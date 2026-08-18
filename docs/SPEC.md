@@ -18,6 +18,8 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 10. Destructive actions are unavailable while `APP_MODE=dry-run`.
 11. The exact outbound RFC822 payload and stable Message-ID are stored before SMTP; SMTP, Sent-copy, and completion stages are durable.
 12. If the process dies during an SMTP attempt, automatic resend is blocked unless the stable Message-ID is already found in Sent; this favors duplicate prevention over an unsafe blind retry.
+13. Done, Reply, and Forward acquire an expiring atomic per-mail lock before mutation.
+14. Images classified as inline/signature/uncertain are excluded from the primary attachment count and Forward, but remain explicitly reviewable by the user.
 
 ## Telegram lifecycle
 
@@ -25,6 +27,9 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 - A new item contains sender, subject, time, AI summary/priority, suggested action, and real attachment count.
 - `Full text` extracts plain text or sanitized HTML and paginates it by editing the same Telegram card, with `Back` restoring the summary.
 - `Attachments` retrieves real attachments from IMAP and sends them into the chat.
+- `Hidden images` retrieves signature/inline/uncertain images only on demand; Back removes those temporary Telegram messages.
+- `Ask AI` accepts a free-form question scoped to the current mail, extractable real attachments, or the discovered thread, and renders the answer on the same card.
+- `Thread` searches Inbox, configured/discovered Archive, and configured/discovered Sent by Message-ID relationships and normalized subject, then shows an AI status summary and compact timeline.
 - All Telegram message IDs belonging to a mail are tracked for Done cleanup.
 - Every 36 hours, the full pending queue is silently refreshed oldest-to-newest. Each replacement card is sent and persisted before the previous card is deleted, avoiding a gap if Telegram delivery fails and preserving visual order.
 - If the bot is offline beyond Telegram's deletion window, old content may not be deletable; this is a platform limitation.
@@ -35,6 +40,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 1. Choose Reply or Reply All.
 2. AI creates an initial formal draft using the current message context.
 3. The user may change tone, give an instruction to AI, replace the text directly, regenerate, cancel, or approve.
+   The initial draft and subsequent AI rewrites include the discovered thread context.
 4. The final screen includes recipients and body.
 5. Approval sends via SMTP with `In-Reply-To` and `References`.
 6. After SMTP success, the state becomes `sent_pending_sentcopy` before the exact RFC822 message is appended to Exchange Sent.
@@ -55,6 +61,12 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 Providers are ordered through `AI_PROVIDER_ORDER`, for example `proxy,ollama` or `ollama,proxy`. Both analysis and reply drafting use the same fallback chain. Failure of every provider leaves the email usable without analysis. Email contents are never logged.
 
 The analysis contract is JSON containing importance, score, Persian summary, suggested action, optional deadline, and reason. Email content is untrusted data and must not override the system prompt.
+
+Background analysis is a durable SQLite job. A crash releases an expired lease for retry; provider failures use bounded exponential delay and become terminal after five attempts. Interactive questions remain recoverable through the persisted Telegram update offset and conversation state.
+
+## Attachment classification
+
+Classification uses MIME disposition, CID references, HTML usage, content type, filename patterns, byte size, and image dimensions; a SHA-256 fingerprint is retained for audit and future recurrence learning. Non-image files are real attachments. CID-referenced images are hidden even when a sender incorrectly labels them as ordinary attachments. Common signature/logo/icon names and small icon/signature geometry are also hidden. Explicit normal-sized image attachments remain real. Hidden items are never silently discarded: the user can inspect them, and returning to the summary removes only their temporary Telegram copies.
 
 ## Exchange discovery gate
 

@@ -9,9 +9,10 @@ For every behavior or configuration change:
 3. Update `docs/SPEC.md` for user-visible lifecycle or invariant changes.
 4. Update `docs/ARCHITECTURE.md` for state, adapter, recovery, or security changes.
 5. Update `docs/OPERATIONS.md` for deployment, migration, health, backup, or troubleshooting changes.
-6. Keep `README.md` and `README.fa.md` aligned on features, safety gates, and links.
-7. Add a dated `CHANGELOG.md` entry for a release.
-8. Run `npm run check`, `npm audit --omit=dev`, `docker compose config --quiet`, and a tracked-tree secret/confidentiality scan.
-9. After push, require the GitHub Actions run to pass and verify the expected GHCR architecture/tag metadata.
+6. Add sanitized MIME regression fixtures for any attachment-classification change; cover false-positive and false-negative cases.
+7. Keep `README.md` and `README.fa.md` aligned on features, safety gates, and links.
+8. Add a dated `CHANGELOG.md` entry for a release.
+9. Run `npm run check`, `npm audit --omit=dev`, `docker compose config --quiet`, and a tracked-tree secret/confidentiality scan.
+10. After push, require the GitHub Actions run to pass and verify the expected GHCR architecture/tag metadata.
 
 Do not document local credentials, real mail addresses, private folder rules, API keys, host IPs, Telegram IDs, or production logs.

@@ -33,8 +33,11 @@ async function main(): Promise<void> {
       for (const old of ordered.sort((a, b) => b.modified - a.modified).slice(config.BACKUP_RETENTION)) {
         await unlink(join(config.BACKUP_DIR, old.name));
       }
+      store.setKv("backup:last-success", new Date().toISOString());
+      store.deleteKv("backup:last-error");
       logger.info("SQLite online backup completed", { filename, retention: config.BACKUP_RETENTION });
     } catch (error) {
+      store.setKv("backup:last-error", error instanceof Error ? error.message : String(error));
       logger.error("SQLite online backup failed", { error: error instanceof Error ? error.message : String(error) });
     }
   };

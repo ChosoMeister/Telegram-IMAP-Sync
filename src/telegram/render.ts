@@ -7,6 +7,7 @@ export function renderMail(mail: StoredMail): string {
   const a = mail.analysis;
   const from = mail.from.map((item) => item.name ? `${item.name} <${item.address}>` : item.address).join(", ") || "نامشخص";
   const real = mail.attachments.filter((item) => item.isRealAttachment);
+  const hidden = mail.attachments.filter((item) => !item.isRealAttachment);
   return [
     `${a ? badge[a.importance] : "⚪️"} <b>${a ? `${importanceFa(a.importance)} — ${a.score}/100` : "در انتظار تحلیل AI"}</b>`,
     ``,
@@ -15,7 +16,8 @@ export function renderMail(mail: StoredMail): string {
     `<b>زمان:</b> ${esc(new Intl.DateTimeFormat("fa-IR", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Tehran" }).format(mail.receivedAt))}`,
     ``,
     a ? `<b>خلاصه AI:</b>\n${esc(a.summaryFa)}\n\n<b>اقدام پیشنهادی:</b>\n${esc(a.suggestedAction)}` : `<i>ایمیل بدون انتظار برای AI دریافت شد؛ نتیجه بعداً افزوده می‌شود.</i>`,
-    real.length ? `\n\n📎 ${real.length} پیوست — ${formatSize(real.reduce((n, x) => n + x.size, 0))}` : ""
+    real.length ? `\n\n📎 ${real.length} پیوست اصلی — ${formatSize(real.reduce((n, x) => n + x.size, 0))}` : "",
+    hidden.length ? `🖼 ${hidden.length} تصویر درون‌متن/امضا مخفی شد` : ""
   ].join("\n");
 }
 
@@ -25,10 +27,15 @@ export function mailButtons(mail: StoredMail) {
     [{ text: "📄 متن کامل", callback_data: `m:${id}:body`, style: "primary" }]
   ];
   if (mail.attachments.some((a) => a.isRealAttachment)) rows[0]?.push({ text: "📎 دریافت فایل‌ها", callback_data: `m:${id}:files` });
+  if (mail.attachments.some((a) => !a.isRealAttachment)) rows.push([{ text: "🖼 بررسی تصاویر مخفی", callback_data: `m:${id}:hidden` }]);
   rows.push([
     { text: "✅ انجام شد", callback_data: `m:${id}:done`, style: "success" },
     { text: "↩️ پاسخ", callback_data: `m:${id}:reply`, style: "primary" },
     { text: "↪️ فوروارد", callback_data: `m:${id}:forward`, style: "primary" }
+  ]);
+  rows.push([
+    { text: "✨ از AI بپرس", callback_data: `m:${id}:ask`, style: "primary" },
+    { text: "🧵 مکالمه", callback_data: `m:${id}:thread` }
   ]);
   if (mail.cc.length || mail.to.length > 1) rows[1]?.push({ text: "👥 Reply All", callback_data: `m:${id}:replyall` });
   return rows;

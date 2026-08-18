@@ -13,18 +13,23 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Persian priority, summary, suggested action, and deadline extraction
 - HTML-to-text handling with same-card pagination and Back navigation
 - On-demand real attachments with inline signature-image filtering
+- Multi-signal separation of real attachments from CID images, logos, icons, and signature assets, with an on-demand hidden-file review
 - Done: verified Exchange archive, then Telegram cleanup
 - Pending queue rotation every 36 hours, oldest-to-newest and silent
 - AI-assisted Reply and Reply All with tone, custom instruction, direct editing, and explicit approval
 - AI-assisted Forward to one or more recipients with a custom note and original attachments
+- Free-form Ask AI over the current message, extractable PDF/DOCX/text attachments, or the full mail thread
+- Thread discovery across Inbox, Archive, and Sent with AI status summary and thread-aware reply drafts
 - Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
+- Atomic per-mail action locks, versioned SQLite migrations, and a durable AI analysis queue
 - Stable pre-send Message-ID and durable outbound RFC822 recovery state
 - Automatic IMAP reconnect with exponential backoff
 - Telegram rate-limit/transient-failure backoff without unsafe message-send retries
 - SQLite recovery state, IMAP-aware health endpoint, structured redacted logs
 - Online SQLite backups with configurable retention
+- Component health for AI, SMTP, Telegram, backup, queue, and IMAP plus completed-state retention
 - Multi-architecture Docker design for Linux, macOS, and Windows hosts
 
 ## Documentation
@@ -59,7 +64,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.2.0
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.3.0
 ```
 
 ## Windows installation (Docker Desktop)

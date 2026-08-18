@@ -16,12 +16,15 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
   };
   const imap = {
     archive, fetchAttachment: vi.fn(), scanInbox: vi.fn().mockResolvedValue([]), connect: vi.fn(), waitForChanges: vi.fn(), stop: vi.fn(),
+    findThread: vi.fn().mockResolvedValue([incoming]),
+    sentContainsMessageId: vi.fn().mockResolvedValue(false), appendSent: vi.fn().mockResolvedValue(undefined),
     mailboxIdentity: vi.fn().mockReturnValue({ path: incoming.mailbox, uidValidity: incoming.uidValidity }), isConnected: vi.fn().mockReturnValue(true),
     listInboxUids: vi.fn().mockResolvedValue(new Set([incoming.uid]))
   };
-  const ai = { analyze: vi.fn().mockResolvedValue(undefined) };
-  const app = new MailBotApp(isolatedConfig, store, imap as any, {} as any, telegram as any, ai as any, new Logger("error"));
-  return { app, store, telegram, imap, archive, id };
+  const ai = { analyze: vi.fn().mockResolvedValue(undefined), ask: vi.fn().mockResolvedValue("پاسخ آزمایشی"), status: vi.fn().mockReturnValue({}) };
+  const smtp = { status: vi.fn().mockReturnValue({}), verify: vi.fn().mockResolvedValue(undefined), buildReply: vi.fn().mockResolvedValue(Buffer.from("raw")), sendRaw: vi.fn().mockResolvedValue(undefined) };
+  const app = new MailBotApp(isolatedConfig, store, imap as any, smtp as any, telegram as any, ai as any, new Logger("error"));
+  return { app, store, telegram, imap, smtp, archive, id };
 }
 
 describe("Done transaction", () => {
@@ -58,6 +61,63 @@ describe("Done transaction", () => {
     expect(s.telegram.answerCallbackQuery).toHaveBeenCalledWith("cb", "این ایمیل قبلاً انجام شده است");
     expect(s.telegram.deleteMessages).toHaveBeenCalledWith([100, 101]);
     expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([]);
+    s.store.close();
+  });
+  it("serializes concurrent Done callbacks with an atomic mail lock", async () => {
+    let finish!: () => void;
+    const archive = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+    const s = setup(archive);
+    (s.app as any).config.APP_MODE = "live";
+    const first = (s.app as any).handleCallback("cb1", `m:${s.id}:done`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const second = (s.app as any).handleCallback("cb2", `m:${s.id}:done`);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(archive).toHaveBeenCalledOnce();
+    expect(s.telegram.answerCallbackQuery).toHaveBeenCalledWith("cb2", "عملیات در حال انجام است");
+    finish();
+    await Promise.all([first, second]);
+    s.store.close();
+  });
+  it("continues an idempotent action when Telegram replays an expired callback after restart", async () => {
+    const s = setup();
+    (s.app as any).config.APP_MODE = "live";
+    s.telegram.answerCallbackQuery.mockRejectedValueOnce(new Error("Telegram answerCallbackQuery: Bad Request: query is too old and response timeout expired or query ID is invalid"));
+    await (s.app as any).handleCallback("expired", `m:${s.id}:done`);
+    expect(s.archive).toHaveBeenCalledOnce();
+    expect(s.store.getMail(s.id)?.state).toBe("done");
+    s.store.close();
+  });
+});
+
+describe("reply crash-stage recovery", () => {
+  it("does not repeat accepted SMTP when Sent APPEND is retried", async () => {
+    const s = setup();
+    (s.app as any).config.APP_MODE = "live";
+    s.store.setConversation(42, s.id, "review", false, "formal", "پاسخ");
+    s.imap.appendSent.mockRejectedValueOnce(new Error("append failed")).mockResolvedValueOnce(undefined);
+    await (s.app as any).sendReply(s.store.getMail(s.id));
+    expect(s.smtp.sendRaw).toHaveBeenCalledOnce();
+    expect(s.store.getOutbound(s.id)).toMatchObject({ smtpAccepted: true, sentSaved: false });
+    await (s.app as any).sendReply(s.store.getMail(s.id));
+    expect(s.smtp.sendRaw).toHaveBeenCalledOnce();
+    expect(s.imap.appendSent).toHaveBeenCalledTimes(2);
+    expect(s.archive).toHaveBeenCalledOnce();
+    expect(s.store.getOutbound(s.id)).toMatchObject({ completed: true });
+    s.store.close();
+  });
+
+  it("retries only Archive after the sent copy was saved", async () => {
+    const archive = vi.fn().mockRejectedValueOnce(new Error("archive failed")).mockResolvedValueOnce(undefined);
+    const s = setup(archive);
+    (s.app as any).config.APP_MODE = "live";
+    s.store.setConversation(42, s.id, "review", false, "formal", "پاسخ");
+    await (s.app as any).sendReply(s.store.getMail(s.id));
+    expect(s.store.getOutbound(s.id)).toMatchObject({ smtpAccepted: true, sentSaved: true, completed: false });
+    await (s.app as any).sendReply(s.store.getMail(s.id));
+    expect(s.smtp.sendRaw).toHaveBeenCalledOnce();
+    expect(s.imap.appendSent).toHaveBeenCalledOnce();
+    expect(archive).toHaveBeenCalledTimes(2);
+    expect(s.store.getOutbound(s.id)).toMatchObject({ completed: true });
     s.store.close();
   });
 });
@@ -127,6 +187,16 @@ describe("single-card navigation", () => {
     s.store.setTelegramMessages(other.id, [102]);
     await (s.app as any).showSummary(s.store.getMail(other.id));
     expect(s.store.getConversation(42, s.id)?.draft).toBe("First reply draft");
+    s.store.close();
+  });
+
+  it("asks AI about the selected mail and renders the answer on the same card", async () => {
+    const s = setup();
+    await (s.app as any).handleCallback("cb1", `m:${s.id}:askmail`);
+    await (s.app as any).handleText({ message_id: 300, chat: { id: 42 }, text: "چه کاری لازم است؟", from: { id: 42 } });
+    expect((s.app as any).ai.ask).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "چه کاری لازم است؟", [], "");
+    expect(s.telegram.editMessage).toHaveBeenLastCalledWith(100, expect.stringContaining("پاسخ آزمایشی"), expect.any(Array));
+    expect(s.store.getConversation(42, s.id)).toBeUndefined();
     s.store.close();
   });
 });

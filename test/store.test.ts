@@ -53,4 +53,24 @@ describe("Store", () => {
     expect(store.getOutbound(id)).toMatchObject({ completed: true });
     expect(store.getOutbound(id)?.raw.toString()).toBe("raw-message");
   });
+  it("uses expiring atomic locks for mail actions", () => {
+    const { id } = store.upsertMail(incoming);
+    expect(store.acquireActionLock(id, "reply", "first", 60_000)).toBe(true);
+    expect(store.acquireActionLock(id, "reply", "second", 60_000)).toBe(false);
+    store.releaseActionLock(id, "second");
+    expect(store.acquireActionLock(id, "reply", "third", 60_000)).toBe(false);
+    store.releaseActionLock(id, "first");
+    expect(store.acquireActionLock(id, "reply", "third", 60_000)).toBe(true);
+  });
+  it("leases and recovers durable jobs", () => {
+    const { id } = store.upsertMail(incoming);
+    store.enqueueJob("analyze", id, { source: "sync" });
+    const job = store.leaseJob(60_000);
+    expect(job).toMatchObject({ kind: "analyze", mailId: id, attempts: 1, payload: { source: "sync" } });
+    expect(store.leaseJob()).toBeUndefined();
+    store.failJob(job!.id, "temporary", 0);
+    expect(store.leaseJob()).toMatchObject({ id: job!.id, attempts: 2 });
+    store.completeJob(job!.id);
+    expect(store.jobCounts()).toMatchObject({ complete: 1 });
+  });
 });

@@ -1,4 +1,5 @@
 import sanitizeHtml from "sanitize-html";
+import { createHash } from "node:crypto";
 import type { Attachment, ParsedMail } from "mailparser";
 import type { Address, IncomingMail, MailAttachment } from "../domain/types.js";
 
@@ -50,17 +51,64 @@ function addresses(value: ParsedMail["from"] | ParsedMail["to"]): Address[] {
 
 function attachmentMeta(attachment: Attachment, index: number, html?: string): MailAttachment {
   const disposition = attachment.contentDisposition === "inline" ? "inline" : "attachment";
-  const referenced = Boolean(attachment.cid && html?.includes(`cid:${attachment.cid}`));
-  const likelySignatureImage = disposition === "inline" && referenced && attachment.size < 100_000;
+  const referenced = Boolean(attachment.cid && html && new RegExp(`cid:${escapeRegex(attachment.cid)}`, "i").test(html));
+  const filename = attachment.filename || `attachment-${index + 1}`;
+  const image = attachment.contentType.toLowerCase().startsWith("image/");
+  const dimensions = imageDimensions(attachment.content, attachment.contentType);
+  const classification = classifyAttachment({ filename, image, disposition, referenced, size: attachment.size, ...dimensions });
   return {
     partId: String(index),
-    filename: attachment.filename || `attachment-${index + 1}`,
+    filename,
     contentType: attachment.contentType,
     size: attachment.size,
     contentDisposition: disposition,
     ...(attachment.cid ? { contentId: attachment.cid } : {}),
-    isRealAttachment: disposition === "attachment" || !likelySignatureImage
+    classification: classification.kind,
+    classificationReason: classification.reason,
+    sha256: createHash("sha256").update(attachment.content).digest("hex"),
+    ...dimensions,
+    isRealAttachment: classification.kind === "real"
   };
+}
+
+function classifyAttachment(input: {
+  filename: string; image: boolean; disposition: "inline" | "attachment"; referenced: boolean;
+  size: number; width?: number; height?: number;
+}): { kind: NonNullable<MailAttachment["classification"]>; reason: string } {
+  if (!input.image) return { kind: "real", reason: "non-image attachment" };
+  const name = input.filename.toLowerCase();
+  const signatureName = /(?:^|[_.-])(image\d{1,3}|logo|signature|sig|facebook|instagram|linkedin|twitter|youtube|whatsapp|telegram|icon)(?:[_.-]|$)/i.test(name);
+  const tinyIcon = Boolean(input.width && input.height && input.width <= 128 && input.height <= 128 && input.size <= 150_000);
+  const signatureShape = Boolean(input.width && input.height && input.width <= 900 && input.height <= 320 && input.size <= 300_000);
+  if (input.referenced) return { kind: "inline", reason: "CID image referenced by HTML" };
+  if (signatureName && input.size <= 500_000) return { kind: "signature", reason: "signature/logo filename pattern" };
+  if (tinyIcon) return { kind: "signature", reason: "small icon dimensions" };
+  if (input.disposition === "inline" && signatureShape) return { kind: "signature", reason: "small inline signature-shaped image" };
+  if (input.disposition === "inline") return { kind: "uncertain", reason: "unreferenced inline image" };
+  return { kind: "real", reason: "explicit image attachment" };
+}
+
+function escapeRegex(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+function imageDimensions(content: Buffer, contentType: string): { width?: number; height?: number } {
+  if (contentType === "image/png" && content.length >= 24 && content.toString("ascii", 1, 4) === "PNG") {
+    return { width: content.readUInt32BE(16), height: content.readUInt32BE(20) };
+  }
+  if (contentType === "image/gif" && content.length >= 10) return { width: content.readUInt16LE(6), height: content.readUInt16LE(8) };
+  if (contentType === "image/jpeg") {
+    let offset = 2;
+    while (offset + 9 < content.length) {
+      if (content[offset] !== 0xff) { offset++; continue; }
+      const marker = content[offset + 1]!;
+      if ([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(marker)) {
+        return { height: content.readUInt16BE(offset + 5), width: content.readUInt16BE(offset + 7) };
+      }
+      const length = content.readUInt16BE(offset + 2);
+      if (length < 2) break;
+      offset += length + 2;
+    }
+  }
+  return {};
 }
 
 export function parsedMailToIncoming(parsed: ParsedMail, identity: Pick<IncomingMail, "uid" | "uidValidity" | "mailbox">): IncomingMail {

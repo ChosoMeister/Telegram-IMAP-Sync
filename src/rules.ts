@@ -44,7 +44,7 @@ function matches(rule: MailRule, mail: IncomingMail): boolean {
   const from = mail.from.map((item) => item.address.toLowerCase());
   const to = mail.to.map((item) => item.address.toLowerCase());
   const cc = mail.cc.map((item) => item.address.toLowerCase());
-  const searchable = [mail.subject, mail.text, ...mail.attachments.map((item) => item.filename)].join("\n").toLowerCase();
+  const searchable = [mail.subject, mail.text, ...mail.attachments.filter((item) => item.isRealAttachment).map((item) => item.filename)].join("\n").toLowerCase();
   return matchAddressGroup(rule.match.fromAny, from)
     && matchAddressGroup(rule.match.toAny, to)
     && matchAddressGroup(rule.match.ccAny, cc)

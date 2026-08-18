@@ -11,6 +11,7 @@ type Button = { text: string; callback_data?: string; style?: "danger" | "succes
 
 export class TelegramApi {
   private readonly base: string;
+  private health: { ok?: boolean; lastSuccess?: string; lastError?: string } = {};
   constructor(private readonly config: AppConfig) { this.base = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}`; }
 
   private async call<T>(method: string, body: Record<string, unknown>, retrySafe = true): Promise<T> {
@@ -22,12 +23,13 @@ export class TelegramApi {
           signal: AbortSignal.timeout(40_000)
         });
         const json = await response.json() as { ok: boolean; result: T; description?: string; parameters?: { retry_after?: number } };
-        if (json.ok) return json.result;
+        if (json.ok) { this.health = { ok: true, lastSuccess: new Date().toISOString() }; return json.result; }
         const retryAfter = json.parameters?.retry_after;
         const retryable = response.status === 429 || (retrySafe && response.status >= 500);
         if (!retryable || attempt === 3) throw new Error(`Telegram ${method}: ${json.description ?? response.status}`);
         await this.delay((retryAfter ? retryAfter * 1000 : 500 * (2 ** attempt)) + Math.floor(Math.random() * 250));
       } catch (error) {
+        this.health = { ok: false, lastError: error instanceof Error ? error.message : String(error) };
         lastError = error;
         if (!retrySafe || attempt === 3 || (error instanceof Error && error.message.startsWith("Telegram "))) throw error;
         await this.delay(500 * (2 ** attempt) + Math.floor(Math.random() * 250));
@@ -37,6 +39,7 @@ export class TelegramApi {
   }
 
   private delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
+  status(): Record<string, unknown> { return this.health; }
 
   getMe(): Promise<{ id: number; username?: string; is_bot: boolean }> { return this.call("getMe", {}); }
   getChat(): Promise<{ id: number; type: string }> { return this.call("getChat", { chat_id: this.config.TELEGRAM_USER_ID }); }
@@ -60,7 +63,10 @@ export class TelegramApi {
     } catch (error) {
       // Telegram returns 400 when the card is already in the requested state.
       // For navigation/normalization this is an idempotent success, not a failure.
-      if (error instanceof Error && error.message.includes("message is not modified")) return true;
+      if (error instanceof Error && error.message.includes("message is not modified")) {
+        this.health = { ok: true, lastSuccess: new Date().toISOString() };
+        return true;
+      }
       throw error;
     }
   }
@@ -77,7 +83,8 @@ export class TelegramApi {
       const json = await response.json() as {
         ok: boolean; result: TelegramMessage; description?: string; parameters?: { retry_after?: number }
       };
-      if (json.ok) return json.result;
+      if (json.ok) { this.health = { ok: true, lastSuccess: new Date().toISOString() }; return json.result; }
+      this.health = { ok: false, lastError: json.description ?? String(response.status) };
       if (response.status !== 429 || attempt === 3) throw new Error(`Telegram sendDocument: ${json.description ?? response.status}`);
       await this.delay(((json.parameters?.retry_after ?? 1) * 1000) + Math.floor(Math.random() * 250));
     }

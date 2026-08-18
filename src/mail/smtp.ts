@@ -6,6 +6,7 @@ import type { ReplyDraft, StoredMail } from "../domain/types.js";
 
 export class SmtpService {
   private transporter;
+  private health: { ok?: boolean; lastSuccess?: string; lastError?: string } = {};
   constructor(private config: AppConfig) {
     this.transporter = nodemailer.createTransport({
       host: config.SMTP_HOST, port: config.SMTP_PORT, secure: config.SMTP_SECURE,
@@ -13,7 +14,11 @@ export class SmtpService {
     });
   }
 
-  async verify(): Promise<void> { await this.transporter.verify(); }
+  status(): Record<string, unknown> { return this.health; }
+  async verify(): Promise<void> {
+    try { await this.transporter.verify(); this.health = { ok: true, lastSuccess: new Date().toISOString() }; }
+    catch (error) { this.health = { ok: false, lastError: error instanceof Error ? error.message : String(error) }; throw error; }
+  }
 
   async buildReply(mail: StoredMail, draft: ReplyDraft, messageId?: string): Promise<Buffer> {
     return new MailComposer({
@@ -48,6 +53,7 @@ export class SmtpService {
     const text = `${note.trim()}\n\n${header}\n\n${original}`;
     const html = `<div dir="auto">${escapeHtml(note.trim()).replace(/\n/g, "<br>")}</div><br><div>${escapeHtml(header).replace(/\n/g, "<br>")}</div><br><div dir="auto">${escapeHtml(original).replace(/\n/g, "<br>")}</div>`;
     const attachments = mail.attachments.filter((item) => item.isRealAttachment).flatMap((item) => {
+      if (item.size > this.config.MAX_ATTACHMENT_BYTES) throw new Error(`Attachment ${item.filename} exceeds configured size limit`);
       const originalAttachment = parsed.attachments[Number(item.partId)];
       return originalAttachment ? [{
         filename: originalAttachment.filename || item.filename,
@@ -72,7 +78,13 @@ export class SmtpService {
 
   async sendRaw(recipients: string[], raw: Buffer): Promise<void> {
     if (this.config.APP_MODE !== "live") throw new Error("SMTP sending is disabled in dry-run mode");
-    await this.transporter.sendMail({ envelope: { from: this.config.SMTP_FROM, to: recipients }, raw });
+    try {
+      await this.transporter.sendMail({ envelope: { from: this.config.SMTP_FROM, to: recipients }, raw });
+      this.health = { ok: true, lastSuccess: new Date().toISOString() };
+    } catch (error) {
+      this.health = { ok: false, lastError: error instanceof Error ? error.message : String(error) };
+      throw error;
+    }
   }
 }
 

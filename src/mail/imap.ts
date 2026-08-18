@@ -153,6 +153,7 @@ export class ImapService {
   }
 
   async fetchAttachment(mail: StoredMail, attachment: MailAttachment): Promise<Buffer> {
+    if (attachment.size > this.config.MAX_ATTACHMENT_BYTES) throw new Error(`Attachment exceeds configured ${this.config.MAX_ATTACHMENT_BYTES}-byte limit`);
     const client = this.requireClient();
     const lock = await client.getMailboxLock(mail.mailbox);
     try {
@@ -163,6 +164,58 @@ export class ImapService {
       if (!match) throw new Error("Attachment no longer exists");
       return match.content;
     } finally { lock.release(); }
+  }
+
+  async findThread(mail: StoredMail): Promise<IncomingMail[]> {
+    const client = this.requireClient();
+    const identifiers = [...new Set([mail.messageId].filter((value): value is string => Boolean(value)))]
+      .map((value) => value.replace(/^<|>$/g, ""));
+    const subject = mail.subject.replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "").trim();
+    const boxes = await client.list();
+    const archive = this.config.IMAP_ARCHIVE_MAILBOX ?? boxes.find((box) => box.specialUse === "\\Archive")?.path;
+    const sent = this.config.IMAP_SENT_MAILBOX ?? boxes.find((box) => box.specialUse === "\\Sent")?.path;
+    const paths = [...new Set([this.config.IMAP_MAILBOX, archive, sent].filter((value): value is string => Boolean(value)))];
+    const sources: Array<{ source: Buffer; uid: number; uidValidity: string; mailbox: string }> = [];
+    for (const path of paths) {
+      const lookup = this.createClient();
+      try {
+        await lookup.connect();
+        const lock = await lookup.getMailboxLock(path);
+        try {
+        const queries: any[] = identifiers.flatMap((id) => [
+          { header: { "message-id": id } }, { header: { "in-reply-to": id } }, { header: { references: id } }
+        ]);
+        if (subject) queries.push({ subject });
+        if (!queries.length) continue;
+        const foundSet = new Set<number>();
+        for (const criteria of queries) {
+          for (const uid of await lookup.search(criteria, { uid: true }) || []) foundSet.add(uid);
+          if (!lookup.usable) throw new Error("IMAP disconnected during thread search");
+          if (foundSet.size >= this.config.THREAD_MAX_MESSAGES) break;
+        }
+        const found = [...foundSet].sort((a, b) => a - b).slice(-this.config.THREAD_MAX_MESSAGES);
+        const mailbox = lookup.mailbox;
+        if (!found.length || !mailbox) continue;
+        for await (const message of lookup.fetch(found.join(","), { uid: true, source: true }, { uid: true })) {
+          if (!message.source || !message.uid) continue;
+          sources.push({ source: message.source, uid: message.uid, uidValidity: String(mailbox.uidValidity), mailbox: path });
+        }
+        } finally { lock.release(); }
+        this.logger.debug("Thread mailbox searched", { sourceMailId: mail.id, candidateCount: sources.length });
+      } finally { if (lookup.usable) await lookup.logout().catch(() => undefined); }
+      if (sources.length >= this.config.THREAD_MAX_MESSAGES) break;
+    }
+    const result: IncomingMail[] = [];
+    const seen = new Set<string>();
+    for (const item of sources.slice(-this.config.THREAD_MAX_MESSAGES)) {
+      const parsed = await simpleParser(item.source);
+      const key = parsed.messageId ?? `${item.mailbox}:${item.uid}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(parsedMailToIncoming(parsed, { uid: item.uid, uidValidity: item.uidValidity, mailbox: item.mailbox }));
+    }
+    this.logger.debug("Thread sources parsed", { sourceMailId: mail.id, messageCount: result.length });
+    return result.sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime());
   }
 
   async fetchSource(mail: StoredMail): Promise<Buffer> {

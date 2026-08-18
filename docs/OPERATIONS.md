@@ -20,6 +20,8 @@ In PowerShell, use `Copy-Item .env.example .env`. Keep Docker Desktop in Linux-c
 
 GHCR publishes `latest`, the package version, and immutable `sha-<commit>` tags for Linux `amd64` and `arm64`. Pulling is useful for inspection or custom deployment; the repository Compose file intentionally builds the checked-out source so code and configuration stay auditable.
 
+Version 0.3.0 automatically creates versioned SQLite migrations on first start. Existing Inbox messages that contain pre-0.3 attachment metadata are refetched once, reclassified, and edited in place; this does not generate replacement cards.
+
 ## Commission safely
 
 1. Start with `APP_MODE=dry-run` and a bounded `TEST_IMPORT_LIMIT=1`.
@@ -32,7 +34,7 @@ GHCR publishes `latest`, the package version, and immutable `sha-<commit>` tags 
 
 ## Health and status
 
-`http://127.0.0.1:18080/` returns `200` only while IMAP is usable and `503` while disconnected. JSON includes connection state, last successful reconciliation, last Telegram poll, Inbox count, pending/failed state counts, mode, and current time. Inside Telegram, `/status` reports the operational subset.
+`http://127.0.0.1:18080/` returns `200` only while IMAP is usable and `503` while disconnected. JSON includes connection state, last successful reconciliation, last Telegram poll, Inbox/state counts, durable job counts, AI provider results, SMTP and Telegram activity, backup success/error, mode, and current time. Inside Telegram, `/status` reports the operational subset.
 
 Useful commands:
 
@@ -87,4 +89,9 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Ambiguous SMTP attempt:** inspect the configured sent mailbox for the persisted Message-ID before any manual retry. Duplicate prevention intentionally wins over automatic resend.
 - **Telegram and Inbox counts differ:** wait for two reconciliation cycles. External moves are confirmed twice before card cleanup. Ensure `TEST_IMPORT_LIMIT=0`.
 - **Old Telegram card cannot be deleted:** Telegram limits deletion of old messages. Rotation reduces this risk, but prolonged bot downtime can exceed that window.
+- **Signature images still appear as attachments:** inspect `classificationReason` through the hidden-image review, retain a sanitized MIME sample, and add a regression fixture. Do not globally hide all small images because screenshots may be legitimate attachments.
+- **A real image was hidden:** use `Review hidden images`; the file remains retrievable and is not forwarded by default. Classification changes require refetching that Inbox message or receiving a new copy.
+- **Thread has unrelated messages:** repeated generic subjects can produce false candidates. Message-ID relationships are preferred; lower `THREAD_MAX_MESSAGES` and retain exact `References` headers when collecting a sanitized fixture.
+- **Ask AI reports unsupported attachment:** current extraction supports PDF, DOCX, HTML, and text/CSV-like formats. Images require OCR and legacy DOC/XLS or XLSX require a future isolated converter.
+- **AI job is failed:** health reports job counts and provider status. A background analysis becomes terminal after five provider failures; the email remains fully usable and interactive Ask AI can be retried later.
 - **Restart loop:** inspect the first fatal log entry, validate `.env` with `docker compose config`, and test required destinations from inside the container.

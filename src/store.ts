@@ -26,6 +26,14 @@ export interface OutboundOperation {
   completed: boolean;
 }
 
+export interface DurableJob {
+  id: number;
+  kind: string;
+  mailId: number;
+  payload: Record<string, unknown>;
+  attempts: number;
+}
+
 export class Store {
   private readonly db: DatabaseSync;
   constructor(path: string) {
@@ -72,6 +80,10 @@ export class Store {
         completed INTEGER NOT NULL DEFAULT 0,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
     `);
     const conversationColumns = this.db.prepare("PRAGMA table_info(conversations)").all() as unknown as Array<{ name: string }>;
     if (!conversationColumns.some((column) => column.name === "metadata_json")) {
@@ -103,11 +115,96 @@ export class Store {
     if (!outboundColumns.some((column) => column.name === "smtp_attempted")) {
       this.db.exec("ALTER TABLE outbound_operations ADD COLUMN smtp_attempted INTEGER NOT NULL DEFAULT 0");
     }
+    this.applyMigration(1, `
+      CREATE TABLE IF NOT EXISTS action_locks (
+        mail_id INTEGER PRIMARY KEY REFERENCES mails(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        token TEXT NOT NULL,
+        expires_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS jobs (
+        id INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL,
+        mail_id INTEGER NOT NULL REFERENCES mails(id) ON DELETE CASCADE,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        state TEXT NOT NULL DEFAULT 'queued',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        available_at INTEGER NOT NULL DEFAULT 0,
+        lease_until INTEGER,
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(kind, mail_id)
+      );
+      CREATE INDEX IF NOT EXISTS jobs_ready_idx ON jobs(state, available_at);
+    `);
     this.db.prepare("UPDATE mails SET state='failed',last_error='Recovered interrupted operation after restart',updated_at=CURRENT_TIMESTAMP WHERE state='processing'").run();
   }
 
   close(): void { this.db.close(); }
   async backup(path: string): Promise<void> { await backup(this.db, path); }
+
+  private applyMigration(version: number, sql: string): void {
+    const applied = this.db.prepare("SELECT 1 FROM schema_migrations WHERE version=?").get(version);
+    if (applied) return;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec(sql);
+      this.db.prepare("INSERT INTO schema_migrations(version) VALUES(?)").run(version);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  acquireActionLock(mailId: number, action: string, token: string, ttlMs = 300_000): boolean {
+    const now = Date.now();
+    this.db.prepare("DELETE FROM action_locks WHERE expires_at<=?").run(now);
+    const result = this.db.prepare("INSERT OR IGNORE INTO action_locks(mail_id,action,token,expires_at) VALUES(?,?,?,?)")
+      .run(mailId, action, token, now + ttlMs);
+    return result.changes === 1;
+  }
+
+  releaseActionLock(mailId: number, token: string): void {
+    this.db.prepare("DELETE FROM action_locks WHERE mail_id=? AND token=?").run(mailId, token);
+  }
+
+  enqueueJob(kind: string, mailId: number, payload: Record<string, unknown> = {}): void {
+    this.db.prepare(`INSERT INTO jobs(kind,mail_id,payload_json) VALUES(?,?,?)
+      ON CONFLICT(kind,mail_id) DO UPDATE SET state=CASE WHEN jobs.state IN ('complete','failed') THEN jobs.state ELSE 'queued' END,
+      payload_json=excluded.payload_json,available_at=0,updated_at=CURRENT_TIMESTAMP`)
+      .run(kind, mailId, JSON.stringify(payload));
+  }
+
+  leaseJob(leaseMs = 120_000): DurableJob | undefined {
+    const now = Date.now();
+    this.db.prepare("UPDATE jobs SET state='queued',lease_until=NULL WHERE state='running' AND lease_until<=?").run(now);
+    const row = this.db.prepare("SELECT * FROM jobs WHERE state='queued' AND available_at<=? ORDER BY id LIMIT 1").get(now) as any;
+    if (!row) return undefined;
+    const result = this.db.prepare("UPDATE jobs SET state='running',attempts=attempts+1,lease_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND state='queued'")
+      .run(now + leaseMs, row.id);
+    if (result.changes !== 1) return undefined;
+    return { id: row.id, kind: row.kind, mailId: row.mail_id, payload: JSON.parse(row.payload_json), attempts: row.attempts + 1 };
+  }
+
+  completeJob(id: number): void { this.db.prepare("UPDATE jobs SET state='complete',lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id); }
+  failJob(id: number, error: string, retryMs: number, terminal = false): void {
+    this.db.prepare("UPDATE jobs SET state=?,lease_until=NULL,last_error=?,available_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(terminal ? "failed" : "queued", error, Date.now() + retryMs, id);
+  }
+
+  jobCounts(): Record<string, number> {
+    const rows = this.db.prepare("SELECT state,count(*) count FROM jobs GROUP BY state").all() as unknown as Array<{ state: string; count: number }>;
+    return Object.fromEntries(rows.map((row) => [row.state, row.count]));
+  }
+
+  purgeCompleted(retentionDays: number): number {
+    const result = this.db.prepare(`DELETE FROM mails WHERE state IN ('done','external_done')
+      AND datetime(updated_at) < datetime('now', ?)`)
+      .run(`-${retentionDays} days`);
+    return Number(result.changes);
+  }
 
   createOutbound(mailId: number, kind: "reply" | "forward", messageId: string, raw: Buffer): OutboundOperation {
     this.db.prepare("INSERT OR IGNORE INTO outbound_operations(mail_id,kind,message_id,raw_blob) VALUES(?,?,?,?)")
@@ -132,7 +229,11 @@ export class Store {
   upsertMail(mail: IncomingMail): { id: number; created: boolean } {
     const existing = this.db.prepare("SELECT id FROM mails WHERE mailbox=? AND uid_validity=? AND uid=?")
       .get(mail.mailbox, mail.uidValidity, mail.uid) as { id: number } | undefined;
-    if (existing) return { id: existing.id, created: false };
+    if (existing) {
+      this.db.prepare("UPDATE mails SET message_id=?,payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(mail.messageId ?? null, JSON.stringify(mail), existing.id);
+      return { id: existing.id, created: false };
+    }
     const result = this.db.prepare(`
       INSERT INTO mails(uid,uid_validity,mailbox,message_id,payload_json)
       VALUES(?,?,?,?,?)
@@ -151,9 +252,12 @@ export class Store {
   }
 
   listKnownUids(mailbox: string, uidValidity: string): Set<number> {
-    const rows = this.db.prepare("SELECT uid FROM mails WHERE mailbox=? AND uid_validity=?")
-      .all(mailbox, uidValidity) as unknown as Array<{ uid: number }>;
-    return new Set(rows.map((row) => row.uid));
+    const rows = this.db.prepare("SELECT uid,payload_json FROM mails WHERE mailbox=? AND uid_validity=?")
+      .all(mailbox, uidValidity) as unknown as Array<{ uid: number; payload_json: string }>;
+    return new Set(rows.filter((row) => {
+      const payload = JSON.parse(row.payload_json) as IncomingMail;
+      return payload.attachments.every((attachment) => Boolean(attachment.classification));
+    }).map((row) => row.uid));
   }
 
   listActionable(mailbox: string, uidValidity: string): StoredMail[] {

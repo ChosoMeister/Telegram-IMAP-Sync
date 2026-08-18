@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0 - 2026-08-19
+
+- Classify MIME attachments as real, inline, signature, or uncertain using CID, HTML references, names, type, size, and dimensions while recording SHA-256 metadata.
+- Hide signature assets from the primary count and Forward while keeping an explicit on-demand review path.
+- Refetch and reclassify legacy Inbox payloads once without creating replacement Telegram cards.
+- Add free-form Ask AI over the current message, extractable PDF/DOCX/text attachments, or the complete thread.
+- Discover threads across Inbox, Archive, and Sent and use thread context for summaries and reply drafts.
+- Add expiring atomic mail-action locks, versioned SQLite migrations, and a durable background AI job queue.
+- Add attachment/context resource limits, component health telemetry, and completed local-state retention.
+- Continue idempotent actions when Telegram replays an expired callback after a restart.
+- Treat Telegram's idempotent `message is not modified` response as healthy telemetry.
+- Expand regression coverage and synchronize all English and Persian documentation.
+
 ## 0.2.0 - 2026-08-19
 
 - Reconcile Telegram cards when mail is moved out of Inbox by another client.

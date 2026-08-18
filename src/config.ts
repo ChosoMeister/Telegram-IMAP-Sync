@@ -9,6 +9,7 @@ const schema = z.object({
   BACKUP_DIR: z.string().default("/data/backups"),
   BACKUP_INTERVAL_HOURS: z.coerce.number().int().min(1).default(24),
   BACKUP_RETENTION: z.coerce.number().int().min(1).default(7),
+  DATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
   MAIL_RULES_PATH: z.string().optional(),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
 
@@ -22,6 +23,8 @@ const schema = z.object({
   IMAP_SENT_MAILBOX: z.string().optional(),
   IMAP_RECONCILE_SECONDS: z.coerce.number().int().min(30).default(300),
   TEST_IMPORT_LIMIT: z.coerce.number().int().min(0).default(0),
+  THREAD_MAX_MESSAGES: z.coerce.number().int().min(2).max(100).default(30),
+  MAX_ATTACHMENT_BYTES: z.coerce.number().int().min(1_000_000).default(25_000_000),
 
   SMTP_HOST: z.string().min(1),
   SMTP_PORT: z.coerce.number().int().default(587),
@@ -37,6 +40,8 @@ const schema = z.object({
 
   AI_PROVIDER_ORDER: z.string().default("ollama,proxy"),
   AI_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
+  AI_CONTEXT_MAX_CHARS: z.coerce.number().int().min(4_000).default(60_000),
+  AI_ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(100_000).default(10_000_000),
   OLLAMA_BASE_URL: z.string().url().default("http://host.docker.internal:11434"),
   OLLAMA_MODEL: z.string().default("qwen3:14b"),
   AI_PROXY_BASE_URL: z.string().url().optional(),

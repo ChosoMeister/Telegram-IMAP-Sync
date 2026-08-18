@@ -12,6 +12,7 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `BACKUP_DIR` | `/data/backups` | Online SQLite backup destination. |
 | `BACKUP_INTERVAL_HOURS` | `24` | Backup frequency; minimum 1. |
 | `BACKUP_RETENTION` | `7` | Number of newest online backups retained. |
+| `DATA_RETENTION_DAYS` | `90` | Deletes only completed local SQLite records after this age; Exchange messages remain untouched. |
 | `MAIL_RULES_PATH` | unset | JSON rule file, normally `/app/config/mail-rules.json`. |
 | `HEALTH_PORT` | `8080` | Container health/status HTTP port. Compose exposes it as loopback port 18080. |
 
@@ -28,6 +29,8 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `IMAP_SENT_MAILBOX` | auto-discovered if unset | Mailbox receiving the exact accepted outbound copy; commonly `Sent Items`. Explicit configuration is safer. |
 | `IMAP_RECONCILE_SECONDS` | `300` | Full Inbox reconciliation interval; minimum 30. |
 | `TEST_IMPORT_LIMIT` | `0` | Test-only newest-message limit. Production must use `0`. |
+| `THREAD_MAX_MESSAGES` | `30` | Maximum messages retrieved from Inbox/Archive/Sent for one thread; range 2–100. |
+| `MAX_ATTACHMENT_BYTES` | `25000000` | Maximum single attachment transferred to Telegram or included in Forward. |
 | `SMTP_HOST` | required | SMTP submission hostname. |
 | `SMTP_PORT` | `587` | Submission port. |
 | `SMTP_SECURE` | `false` | `false` normally upgrades with STARTTLS; use `true` for implicit TLS. |
@@ -50,6 +53,8 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `AI_ENABLED` | `true` | Disable all analysis/drafting with `false`; mail delivery still works. |
 | `AI_PROVIDER_ORDER` | `ollama,proxy` | Ordered fallback chain. Use `proxy,ollama` to prefer the organization proxy. |
 | `AI_TIMEOUT_MS` | `30000` | Timeout per provider; minimum 1000 ms. |
+| `AI_CONTEXT_MAX_CHARS` | `60000` | Maximum serialized email/thread/document characters supplied to AI. |
+| `AI_ATTACHMENT_MAX_BYTES` | `10000000` | Stricter maximum file size for in-memory PDF/DOCX/text extraction. |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Ollama API base URL as seen from the container. |
 | `OLLAMA_MODEL` | `qwen3:14b` | Local model name. |
 | `AI_PROXY_BASE_URL` | unset | OpenAI-compatible base URL ending in `/v1`. |
@@ -57,6 +62,8 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `AI_PROXY_MODEL` | `gpt-oss-120b` | Proxy model name. |
 
 Unknown providers in `AI_PROVIDER_ORDER` fail that attempt and allow the next provider. If all providers fail, Telegram receives the usable email card without AI enrichment.
+
+Ask AI supports the current email, its real extractable attachments, or its thread. Extractable formats are PDF, DOCX, HTML, TXT, CSV, TSV, JSON, XML, and log/text MIME types. Unsupported and oversized files are named in the context with a reason rather than parsed. Files are processed in memory and are not persisted by the extractor.
 
 ## Production minimum
 

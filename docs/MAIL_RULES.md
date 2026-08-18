@@ -31,7 +31,7 @@ Example:
 Match fields are optional and combined with AND. Values within one array use OR:
 
 - `fromAny`, `toAny`, `ccAny`: case-insensitive address patterns; `*` wildcards are supported. A plain substring also matches an address.
-- `containsAny`: case-insensitive search across subject, normalized text, and attachment filenames.
+- `containsAny`: case-insensitive search across subject, normalized text, and filenames classified as real attachments. Signature/inline image names do not trigger rules.
 
 At least one action is required:
 

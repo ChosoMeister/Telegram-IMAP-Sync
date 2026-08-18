@@ -13,6 +13,11 @@ export interface MailAttachment {
   size: number;
   contentDisposition: "attachment" | "inline";
   contentId?: string;
+  classification?: "real" | "inline" | "signature" | "uncertain";
+  classificationReason?: string;
+  sha256?: string;
+  width?: number;
+  height?: number;
   isRealAttachment: boolean;
 }
 
