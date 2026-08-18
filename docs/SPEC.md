@@ -39,6 +39,14 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 8. A failure offers retry for only the incomplete stage; SMTP is never repeated after acceptance.
 9. Archive success completes the item and removes its Telegram card without adding a separate success message.
 
+## Forward lifecycle
+
+1. The user enters one or more recipient email addresses.
+2. AI proposes a concise Persian forwarding note from the original email context.
+3. The user may instruct AI, change tone, directly edit the note, cancel, or approve.
+4. The forwarded message contains the note, original headers/body, and all real attachments while excluding inline signature images.
+5. SMTP acceptance, Sent storage, source Archive, and Telegram cleanup use the same retry-safe staged transaction as Reply.
+
 ## AI
 
 Providers are ordered through `AI_PROVIDER_ORDER`, for example `proxy,ollama` or `ollama,proxy`. Both analysis and reply drafting use the same fallback chain. Failure of every provider leaves the email usable without analysis. Email contents are never logged.

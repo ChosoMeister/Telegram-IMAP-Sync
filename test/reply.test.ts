@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildReply } from "../src/ai.js";
 import { SmtpService } from "../src/mail/smtp.js";
+import MailComposer from "nodemailer/lib/mail-composer/index.js";
+import { simpleParser } from "mailparser";
 import { config } from "./helpers.js";
 import { incoming } from "./helpers.js";
 
@@ -25,5 +27,21 @@ describe("reply builder", () => {
     expect(raw).toContain("To: Sender <sender@example.com>");
     expect(raw).toContain("Cc: team@example.com");
     expect(raw).toContain("In-Reply-To: <mail@example.com>");
+  });
+  it("builds a forward with the user note, original body and real attachments", async () => {
+    const source = await new MailComposer({
+      from: "sender@example.com", to: "me@example.com", subject: "Invoice", text: "Original body",
+      attachments: [{ filename: "invoice.pdf", content: Buffer.from("PDF") }]
+    }).compile().build();
+    const forwardedMail = { ...mail, text: "Original body", attachments: [{
+      partId: "0", filename: "invoice.pdf", contentType: "application/pdf", size: 3,
+      contentDisposition: "attachment" as const, isRealAttachment: true
+    }] };
+    const raw = await new SmtpService(config).buildForward(forwardedMail, ["colleague@example.com"], "لطفاً بررسی کنید.", source);
+    const parsed = await simpleParser(raw);
+    expect(parsed.to?.text).toContain("colleague@example.com");
+    expect(parsed.text).toContain("لطفاً بررسی کنید.");
+    expect(parsed.text).toContain("Original body");
+    expect(parsed.attachments.map((item) => item.filename)).toEqual(["invoice.pdf"]);
   });
 });

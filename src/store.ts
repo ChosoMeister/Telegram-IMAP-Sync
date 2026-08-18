@@ -46,9 +46,14 @@ export class Store {
         reply_all INTEGER NOT NULL DEFAULT 0,
         tone TEXT NOT NULL DEFAULT 'formal',
         draft_text TEXT,
+        metadata_json TEXT,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    const conversationColumns = this.db.prepare("PRAGMA table_info(conversations)").all() as unknown as Array<{ name: string }>;
+    if (!conversationColumns.some((column) => column.name === "metadata_json")) {
+      this.db.exec("ALTER TABLE conversations ADD COLUMN metadata_json TEXT");
+    }
   }
 
   close(): void { this.db.close(); }
@@ -89,17 +94,21 @@ export class Store {
       .run(state, error ?? null, id);
   }
 
-  setConversation(userId: number, mailId: number, mode: string, replyAll: boolean, tone = "formal", draft?: string): void {
-    this.db.prepare(`INSERT INTO conversations(telegram_user_id,mail_id,mode,reply_all,tone,draft_text)
-      VALUES(?,?,?,?,?,?) ON CONFLICT(telegram_user_id) DO UPDATE SET mail_id=excluded.mail_id,mode=excluded.mode,
-      reply_all=excluded.reply_all,tone=excluded.tone,draft_text=excluded.draft_text,updated_at=CURRENT_TIMESTAMP`)
-      .run(userId, mailId, mode, replyAll ? 1 : 0, tone, draft ?? null);
+  setConversation(userId: number, mailId: number, mode: string, replyAll: boolean, tone = "formal", draft?: string, metadata?: Record<string, unknown>): void {
+    this.db.prepare(`INSERT INTO conversations(telegram_user_id,mail_id,mode,reply_all,tone,draft_text,metadata_json)
+      VALUES(?,?,?,?,?,?,?) ON CONFLICT(telegram_user_id) DO UPDATE SET mail_id=excluded.mail_id,mode=excluded.mode,
+      reply_all=excluded.reply_all,tone=excluded.tone,draft_text=excluded.draft_text,metadata_json=excluded.metadata_json,updated_at=CURRENT_TIMESTAMP`)
+      .run(userId, mailId, mode, replyAll ? 1 : 0, tone, draft ?? null, metadata ? JSON.stringify(metadata) : null);
   }
 
-  getConversation(userId: number): { mailId: number; mode: string; replyAll: boolean; tone: string; draft?: string } | undefined {
+  getConversation(userId: number): { mailId: number; mode: string; replyAll: boolean; tone: string; draft?: string; metadata?: Record<string, unknown> } | undefined {
     const row = this.db.prepare("SELECT * FROM conversations WHERE telegram_user_id=?").get(userId) as any;
     if (!row) return undefined;
-    return { mailId: row.mail_id, mode: row.mode, replyAll: Boolean(row.reply_all), tone: row.tone, ...(row.draft_text ? { draft: row.draft_text } : {}) };
+    return {
+      mailId: row.mail_id, mode: row.mode, replyAll: Boolean(row.reply_all), tone: row.tone,
+      ...(row.draft_text ? { draft: row.draft_text } : {}),
+      ...(row.metadata_json ? { metadata: JSON.parse(row.metadata_json) as Record<string, unknown> } : {})
+    };
   }
 
   clearConversation(userId: number): void { this.db.prepare("DELETE FROM conversations WHERE telegram_user_id=?").run(userId); }

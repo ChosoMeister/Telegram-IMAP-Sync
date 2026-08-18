@@ -17,9 +17,9 @@ describe("Store", () => {
     const { id } = store.upsertMail(incoming);
     store.setAnalysis(id, { importance: "high", score: 80, summaryFa: "خلاصه", suggestedAction: "اقدام", reason: "مهلت", provider: "test" });
     store.setTelegramMessages(id, [10, 11]);
-    store.setConversation(42, id, "review", true, "formal", "draft");
+    store.setConversation(42, id, "review", true, "formal", "draft", { kind: "forward", recipients: ["colleague@example.com"] });
     expect(store.getMail(id)?.analysis?.score).toBe(80);
     expect(store.getMail(id)?.telegramMessageIds).toEqual([10, 11]);
-    expect(store.getConversation(42)).toMatchObject({ mailId: id, replyAll: true, draft: "draft" });
+    expect(store.getConversation(42)).toMatchObject({ mailId: id, replyAll: true, draft: "draft", metadata: { kind: "forward", recipients: ["colleague@example.com"] } });
   });
 });

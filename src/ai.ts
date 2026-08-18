@@ -99,6 +99,20 @@ export class AiService {
     throw new Error("No AI provider could draft a reply");
   }
 
+  async draftForward(mail: StoredMail, instruction: string, tone: string): Promise<string> {
+    const system = "Draft a concise Persian note to accompany a forwarded business email. Use the original mail facts and the user's instruction. Respect the requested tone. Do not invent facts or commitments. Return JSON only: {\"text\":\"...\"}. Do not include a signature.";
+    const user = `${this.context(mail)}\nTone: ${tone}\nUser instruction: ${instruction || "Write the best concise forwarding note and clearly state the expected action."}`;
+    for (const provider of this.providers) {
+      try {
+        const result = parseJson(await provider.complete(system, user));
+        if (typeof result.text === "string" && result.text.trim()) return result.text.trim();
+      } catch (error) {
+        this.logger.warn("AI forward provider failed", { provider: provider.name, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    throw new Error("No AI provider could draft a forwarding note");
+  }
+
   private context(mail: Pick<StoredMail, "subject" | "from" | "to" | "cc" | "receivedAt" | "text">): string {
     return JSON.stringify({ subject: mail.subject, from: mail.from, to: mail.to, cc: mail.cc, receivedAt: mail.receivedAt, body: mail.text });
   }

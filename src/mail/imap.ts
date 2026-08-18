@@ -96,6 +96,16 @@ export class ImapService {
     } finally { lock.release(); }
   }
 
+  async fetchSource(mail: StoredMail): Promise<Buffer> {
+    const client = this.requireClient();
+    const lock = await client.getMailboxLock(mail.mailbox);
+    try {
+      const fetched = await client.fetchOne(mail.uid, { source: true }, { uid: true });
+      if (!fetched || !fetched.source) throw new Error("Message source is unavailable");
+      return fetched.source;
+    } finally { lock.release(); }
+  }
+
   async waitForChanges(onChange: () => Promise<void>): Promise<void> {
     const client = this.requireClient();
     client.on("exists", () => { void onChange(); });

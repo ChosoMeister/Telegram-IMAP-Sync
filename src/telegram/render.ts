@@ -5,7 +5,7 @@ const badge = { critical: "🔴", high: "🟠", normal: "🟡", low: "🟢" } as
 
 export function renderMail(mail: StoredMail): string {
   const a = mail.analysis;
-  const from = mail.from.map((item) => item.name || item.address).join(", ") || "نامشخص";
+  const from = mail.from.map((item) => item.name ? `${item.name} <${item.address}>` : item.address).join(", ") || "نامشخص";
   const real = mail.attachments.filter((item) => item.isRealAttachment);
   return [
     `${a ? badge[a.importance] : "⚪️"} <b>${a ? `${importanceFa(a.importance)} — ${a.score}/100` : "در انتظار تحلیل AI"}</b>`,
@@ -27,7 +27,8 @@ export function mailButtons(mail: StoredMail) {
   if (mail.attachments.some((a) => a.isRealAttachment)) rows[0]?.push({ text: "📎 دریافت فایل‌ها", callback_data: `m:${id}:files` });
   rows.push([
     { text: "✅ انجام شد", callback_data: `m:${id}:done`, style: "success" },
-    { text: "↩️ پاسخ", callback_data: `m:${id}:reply`, style: "primary" }
+    { text: "↩️ پاسخ", callback_data: `m:${id}:reply`, style: "primary" },
+    { text: "↪️ فوروارد", callback_data: `m:${id}:forward`, style: "primary" }
   ]);
   if (mail.cc.length || mail.to.length > 1) rows[1]?.push({ text: "👥 Reply All", callback_data: `m:${id}:replyall` });
   return rows;

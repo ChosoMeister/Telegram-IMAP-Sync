@@ -127,7 +127,7 @@ export class MailBotApp {
   }
 
   private async handleCallback(callbackId: string, data: string): Promise<void> {
-    const match = /^m:(\d+):(summary|body(?::\d+)?|files|done|reply|replyall|instruct|edit|formal|short|friendly|send|cancel)$/.exec(data);
+    const match = /^m:(\d+):(summary|body(?::\d+)?|files|done|reply|replyall|forward|instruct|edit|formal|short|friendly|send|cancel)$/.exec(data);
     if (!match) return;
     const mail = this.store.getMail(Number(match[1]));
     if (!mail) { await this.telegram.answerCallbackQuery(callbackId, "ایمیل پیدا نشد"); return; }
@@ -139,15 +139,22 @@ export class MailBotApp {
     if (action === "files") return this.showFiles(mail);
     if (action === "done") return this.done(mail);
     if (action === "reply" || action === "replyall") return this.startReply(mail, action === "replyall");
+    if (action === "forward") return this.startForward(mail);
     if (action === "instruct" || action === "edit") {
       const current = this.store.getConversation(this.config.TELEGRAM_USER_ID);
-      this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, action === "edit" ? "manual_edit" : "instruction", current?.replyAll ?? false, current?.tone ?? "formal", current?.draft);
-      const prompt = await this.telegram.sendMessage(action === "edit" ? "متن نهایی پاسخ را دقیقاً همان‌طور که باید ارسال شود بنویسید:" : "بگویید پاسخ چه چیزی را بیان کند؛ AI آن را با متن ایمیل و لحن انتخابی ترکیب می‌کند:", undefined, false, true);
+      this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, action === "edit" ? "manual_edit" : "instruction", current?.replyAll ?? false, current?.tone ?? "formal", current?.draft, current?.metadata);
+      const isForward = current?.metadata?.kind === "forward";
+      const prompt = await this.telegram.sendMessage(action === "edit"
+        ? `متن نهایی ${isForward ? "همراه فوروارد" : "پاسخ"} را دقیقاً همان‌طور که باید ارسال شود بنویسید:`
+        : `بگویید متن همراه ${isForward ? "فوروارد" : "پاسخ"} چه چیزی را بیان کند؛ AI آن را با متن ایمیل و لحن انتخابی ترکیب می‌کند:`, undefined, false, true);
       this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
       return;
     }
     if (action === "formal" || action === "short" || action === "friendly") return this.changeTone(mail, action);
-    if (action === "send") return this.sendReply(mail);
+    if (action === "send") {
+      const current = this.store.getConversation(this.config.TELEGRAM_USER_ID);
+      return current?.metadata?.kind === "forward" ? this.sendForward(mail) : this.sendReply(mail);
+    }
     this.store.clearConversation(this.config.TELEGRAM_USER_ID);
     await this.showSummary(mail);
   }
@@ -222,25 +229,81 @@ export class MailBotApp {
     }
   }
 
+  private async startForward(mail: StoredMail): Promise<void> {
+    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_recipients", false, "formal", undefined, { kind: "forward" });
+    const prompt = await this.telegram.sendMessage("آدرس ایمیل گیرنده را وارد کنید. برای چند گیرنده، آدرس‌ها را با ویرگول جدا کنید:", undefined, false, true);
+    this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
+    await this.editPrimary(mail, "↪️ منتظر آدرس گیرنده فوروارد هستم…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
+  }
+
   private async handleText(message: TelegramMessage): Promise<void> {
     const conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID);
-    if (!conversation || !["instruction", "manual_edit"].includes(conversation.mode)) return;
+    if (!conversation || !["instruction", "manual_edit", "forward_recipients"].includes(conversation.mode)) return;
     const mail = this.store.getMail(conversation.mailId);
     if (!mail) return;
-    const draft = conversation.mode === "manual_edit" ? message.text! : await this.ai.draftReply(mail, message.text!, conversation.tone, conversation.replyAll);
-    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", conversation.replyAll, conversation.tone, draft);
-    const auxiliary = [...mail.telegramMessageIds.slice(1), message.message_id];
+    if (conversation.mode === "forward_recipients") {
+      const recipients = this.parseRecipients(message.text!);
+      if (!recipients.length) {
+        await this.telegram.sendMessage("❌ آدرس معتبر پیدا نشد. نمونه: colleague@example.com", undefined, true);
+        return;
+      }
+      let draft = "جهت بررسی و اقدام ارسال می‌شود.";
+      try { draft = await this.ai.draftForward(mail, "", conversation.tone); } catch { /* safe fallback */ }
+      const metadata = { kind: "forward", recipients };
+      this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", false, conversation.tone, draft, metadata);
+      await this.cleanupConversationMessages(mail, message.message_id);
+      await this.showForwardDraft(mail, draft, recipients);
+      return;
+    }
+    const isForward = conversation.metadata?.kind === "forward";
+    const draft = conversation.mode === "manual_edit"
+      ? message.text!
+      : isForward
+        ? await this.ai.draftForward(mail, message.text!, conversation.tone)
+        : await this.ai.draftReply(mail, message.text!, conversation.tone, conversation.replyAll);
+    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", conversation.replyAll, conversation.tone, draft, conversation.metadata);
+    await this.cleanupConversationMessages(mail, message.message_id);
+    if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(conversation.metadata));
+    else await this.showDraft(mail, draft, conversation.replyAll);
+  }
+
+  private async cleanupConversationMessages(mail: StoredMail, incomingMessageId: number): Promise<void> {
+    const auxiliary = [...mail.telegramMessageIds.slice(1), incomingMessageId];
     if (auxiliary.length) await this.telegram.deleteMessages(auxiliary).catch(() => false);
     this.store.setTelegramMessages(mail.id, mail.telegramMessageIds.slice(0, 1), mail.telegramCreatedAt);
-    await this.showDraft(mail, draft, conversation.replyAll);
   }
 
   private async changeTone(mail: StoredMail, tone: "formal" | "short" | "friendly"): Promise<void> {
     const current = this.store.getConversation(this.config.TELEGRAM_USER_ID);
     if (!current || current.mailId !== mail.id) return;
-    const draft = await this.ai.draftReply(mail, "", tone, current.replyAll);
-    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", current.replyAll, tone, draft);
-    await this.showDraft(mail, draft, current.replyAll);
+    const isForward = current.metadata?.kind === "forward";
+    const draft = isForward ? await this.ai.draftForward(mail, "", tone) : await this.ai.draftReply(mail, "", tone, current.replyAll);
+    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", current.replyAll, tone, draft, current.metadata);
+    if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(current.metadata));
+    else await this.showDraft(mail, draft, current.replyAll);
+  }
+
+  private async showForwardDraft(mail: StoredMail, draft: string, recipients: string[]): Promise<void> {
+    await this.editPrimary(mail, `<b>پیش‌نویس متن همراه فوروارد</b>\n<b>گیرندگان:</b> ${esc(recipients.join(", "))}\n<b>پیوست‌ها:</b> ${mail.attachments.filter((item) => item.isRealAttachment).length}\n\n${esc(draft)}`, [[
+      { text: "✅ ارسال نهایی", callback_data: `m:${mail.id}:send`, style: "success" },
+      { text: "💬 دستور به AI", callback_data: `m:${mail.id}:instruct`, style: "primary" },
+      { text: "✏️ ویرایش مستقیم", callback_data: `m:${mail.id}:edit` },
+      { text: "❌ لغو", callback_data: `m:${mail.id}:cancel`, style: "danger" }
+    ], [
+      { text: "رسمی", callback_data: `m:${mail.id}:formal` },
+      { text: "کوتاه", callback_data: `m:${mail.id}:short` },
+      { text: "دوستانه", callback_data: `m:${mail.id}:friendly` }
+    ]]);
+  }
+
+  private parseRecipients(value: string): string[] {
+    return [...new Set(value.split(/[\s,;]+/).map((item) => item.trim().toLowerCase()).filter((item) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(item)))];
+  }
+
+  private forwardRecipients(metadata?: Record<string, unknown>): string[] {
+    const recipients = metadata?.recipients;
+    if (!Array.isArray(recipients) || !recipients.every((item) => typeof item === "string")) throw new Error("Forward recipients are missing");
+    return recipients;
   }
 
   private async showDraft(mail: StoredMail, draft: string, replyAll: boolean): Promise<void> {
@@ -292,6 +355,37 @@ export class MailBotApp {
     } catch (error) {
       const retryStep = sentCopySaved ? "آرشیو" : "ذخیره در Sent";
       await this.telegram.sendMessage(`${replySent ? `⚠️ پاسخ ارسال شد، اما مرحله ${retryStep} ناموفق بود. پاسخ دوباره ارسال نمی‌شود.` : "❌ پاسخ ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, replySent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send`, style: "primary" }]] : undefined);
+    }
+  }
+
+  private async sendForward(mail: StoredMail): Promise<void> {
+    const conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID);
+    if (!conversation?.draft || conversation.mailId !== mail.id) throw new Error("Forward draft is missing");
+    const recipients = this.forwardRecipients(conversation.metadata);
+    let forwardSent = conversation.mode === "forward_sent_pending_sentcopy" || conversation.mode === "forward_sent_pending_archive";
+    let sentCopySaved = conversation.mode === "forward_sent_pending_archive";
+    try {
+      const source = await this.imap.fetchSource(mail);
+      let raw = await this.smtp.buildForward(mail, recipients, conversation.draft, source);
+      if (!forwardSent) {
+        raw = await this.smtp.sendForward(mail, recipients, conversation.draft, source);
+        forwardSent = true;
+        this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_sent_pending_sentcopy", false, conversation.tone, conversation.draft, conversation.metadata);
+      }
+      if (!sentCopySaved) {
+        await this.imap.appendSent(raw);
+        sentCopySaved = true;
+        this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_sent_pending_archive", false, conversation.tone, conversation.draft, conversation.metadata);
+      }
+      await this.imap.archive(mail);
+      await this.telegram.deleteMessages(mail.telegramMessageIds);
+      this.store.setTelegramMessages(mail.id, []);
+      this.store.setState(mail.id, "done");
+      this.store.clearConversation(this.config.TELEGRAM_USER_ID);
+      this.logger.info("Mail forwarded with attachments, saved to Sent, archived and Telegram cleaned", { mailId: mail.id, recipientCount: recipients.length });
+    } catch (error) {
+      const retryStep = sentCopySaved ? "آرشیو" : "ذخیره در Sent";
+      await this.telegram.sendMessage(`${forwardSent ? `⚠️ فوروارد ارسال شد، اما مرحله ${retryStep} ناموفق بود. ایمیل دوباره ارسال نمی‌شود.` : "❌ فوروارد ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, forwardSent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send`, style: "primary" }]] : undefined);
     }
   }
 }
