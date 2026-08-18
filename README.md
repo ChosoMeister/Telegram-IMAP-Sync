@@ -48,6 +48,13 @@ docker compose config
 docker compose build
 ```
 
+Published multi-architecture images are available from GitHub Container Registry:
+
+```sh
+docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.2.0
+```
+
 ## Windows installation (Docker Desktop)
 
 Install Git and Docker Desktop, enable the WSL 2 backend, then run these commands in PowerShell from the cloned repository:
