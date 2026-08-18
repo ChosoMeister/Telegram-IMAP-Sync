@@ -16,7 +16,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "check": "npm run lint && npm run test && npm run build"
+    "docs:check": "node scripts/check-docs.mjs",
+    "check": "npm run lint && npm run test && npm run build && npm run docs:check"
   },
   "dependencies": {
     "deepmerge-ts": "8.0.1",

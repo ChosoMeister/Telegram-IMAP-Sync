@@ -10,5 +10,6 @@
 - Honor Telegram rate limits and rotate pending cards without deleting the old card first.
 - Add online SQLite backups with retention and documented restore behavior.
 - Add Docker log rotation and multi-architecture GitHub CI.
-- Publish signed-revision metadata and multi-architecture images to GitHub Container Registry.
+- Publish OCI revision metadata, provenance attestations, and multi-architecture images to GitHub Container Registry.
 - Normalize nullable AI deadlines and use the discovered Exchange `Sent Items` path.
+- Add complete configuration, operations, mail-rule, Persian, and maintenance documentation with automated drift checks.

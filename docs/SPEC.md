@@ -26,7 +26,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 - `Full text` extracts plain text or sanitized HTML and paginates it by editing the same Telegram card, with `Back` restoring the summary.
 - `Attachments` retrieves real attachments from IMAP and sends them into the chat.
 - All Telegram message IDs belonging to a mail are tracked for Done cleanup.
-- Every 36 hours, the full pending queue is silently deleted and republished oldest-to-newest. This keeps the visual order stable and messages within Telegram's deletion window.
+- Every 36 hours, the full pending queue is silently refreshed oldest-to-newest. Each replacement card is sent and persisted before the previous card is deleted, avoiding a gap if Telegram delivery fails and preserving visual order.
 - If the bot is offline beyond Telegram's deletion window, old content may not be deletable; this is a platform limitation.
 - Mail removed from Inbox by Outlook or another client is confirmed absent on two reconciliations, then its Telegram content is removed automatically.
 

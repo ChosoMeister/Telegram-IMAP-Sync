@@ -27,7 +27,14 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Online SQLite backups with configurable retention
 - Multi-architecture Docker design for Linux, macOS, and Windows hosts
 
-See [product specification](docs/SPEC.md) and [architecture](docs/ARCHITECTURE.md).
+## Documentation
+
+- [Configuration reference](docs/CONFIGURATION.md) — every environment variable and production guidance
+- [Operations runbook](docs/OPERATIONS.md) — deploy, upgrade, backup, restore, health, and troubleshooting
+- [Mail rules](docs/MAIL_RULES.md) — optional local routing before Telegram delivery
+- [Product specification](docs/SPEC.md) and [architecture](docs/ARCHITECTURE.md)
+- [Release and documentation checklist](docs/MAINTENANCE.md)
+- [راهنمای فارسی](README.fa.md)
 
 ## Local preparation
 
@@ -48,7 +55,7 @@ docker compose config
 docker compose build
 ```
 
-Published multi-architecture images are available from GitHub Container Registry:
+Published Linux `amd64`/`arm64` images are available from GitHub Container Registry:
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
@@ -98,7 +105,7 @@ The JSON response also reports the last successful reconciliation, last Telegram
    Confirm the actual Outlook sent-mail folder as well; Exchange commonly uses `Sent Items`, while a separate `Sent` folder may also exist.
 4. Start the service and verify read-only import with a single test email.
 5. Confirm Telegram user authorization, HTML extraction, AI fallback, and attachment filtering.
-6. Test SMTP reply to a controlled recipient and confirm the matching copy in `Sent` and Outlook threading.
+6. Test SMTP reply to a controlled recipient and confirm the matching copy in the configured sent mailbox and Outlook threading.
 7. Test archive with one non-critical message and verify it in Outlook.
 8. Back up the SQLite volume, then set `APP_MODE=live`.
 
@@ -113,6 +120,7 @@ npm run discover
 npm run preflight
 npm test
 npm run lint
+npm run docs:check
 npm run check
 ```
 
@@ -124,3 +132,4 @@ npm run check
 - Attachments are held in memory only for on-demand transfer.
 - The `.env` file stays untracked.
 - The container uses a read-only root filesystem, drops all capabilities, and uses `no-new-privileges`.
+- GHCR images include OCI revision labels and GitHub build-provenance attestations; they are not currently Cosign-signed.

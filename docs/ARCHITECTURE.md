@@ -33,5 +33,6 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 
 - Telegram Bot API cannot delete messages older than 48 hours. Queue rotation minimizes, but cannot eliminate, this risk during prolonged downtime.
 - Exchange folder naming and `MOVE` capability are installation-specific and require live discovery.
-- Sent-copy storage requires IMAP APPEND permission on the configured `Sent` mailbox.
+- Sent-copy storage requires IMAP APPEND permission on the configured sent mailbox (commonly `Sent Items` on Exchange).
 - The default public Bot API accepts files up to 50 MB. The current requirement is at most 25 MB.
+- The service uses Node's built-in SQLite API, which Node 22 still labels experimental; the database format itself is standard SQLite and online backups are used for recovery.
