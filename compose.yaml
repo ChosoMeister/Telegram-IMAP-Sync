@@ -1,0 +1,23 @@
+services:
+  mailbot:
+    build: .
+    image: telegram-imap-sync:local
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - mailbot-data:/data
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - 127.0.0.1:18080:8080
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+volumes:
+  mailbot-data:
