@@ -8,7 +8,7 @@ const analysisSchema = z.object({
   score: z.coerce.number().min(0).max(100),
   summaryFa: z.string().min(1),
   suggestedAction: z.string().min(1),
-  deadline: z.string().optional(),
+  deadline: z.string().nullish().transform((value) => value ?? undefined),
   reason: z.string().min(1)
 });
 

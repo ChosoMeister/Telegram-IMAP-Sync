@@ -13,6 +13,12 @@ describe("Store", () => {
     expect(first.created).toBe(true);
     expect(second).toEqual({ id: first.id, created: false });
   });
+  it("returns known UIDs only for the current mailbox identity", () => {
+    store.upsertMail(incoming);
+    store.upsertMail({ ...incoming, uid: 8 });
+    store.upsertMail({ ...incoming, uid: 9, uidValidity: "different" });
+    expect([...store.listKnownUids(incoming.mailbox, incoming.uidValidity)].sort()).toEqual([7, 8]);
+  });
   it("persists analysis, Telegram IDs and conversation state", () => {
     const { id } = store.upsertMail(incoming);
     store.setAnalysis(id, { importance: "high", score: 80, summaryFa: "خلاصه", suggestedAction: "اقدام", reason: "مهلت", provider: "test" });
@@ -21,5 +27,30 @@ describe("Store", () => {
     expect(store.getMail(id)?.analysis?.score).toBe(80);
     expect(store.getMail(id)?.telegramMessageIds).toEqual([10, 11]);
     expect(store.getConversation(42)).toMatchObject({ mailId: id, replyAll: true, draft: "draft", metadata: { kind: "forward", recipients: ["colleague@example.com"] } });
+  });
+  it("keeps independent drafts for multiple mails", () => {
+    const first = store.upsertMail(incoming);
+    const second = store.upsertMail({ ...incoming, uid: 8 });
+    store.setConversation(42, first.id, "review", false, "formal", "first draft");
+    store.setConversation(42, second.id, "review", true, "friendly", "second draft");
+    expect(store.getConversation(42, first.id)?.draft).toBe("first draft");
+    expect(store.getConversation(42, second.id)?.draft).toBe("second draft");
+    store.clearConversation(42, second.id);
+    expect(store.getConversation(42, first.id)?.draft).toBe("first draft");
+    expect(store.getConversation(42, second.id)).toBeUndefined();
+  });
+  it("durably tracks one outbound RFC822 payload through all stages", () => {
+    const { id } = store.upsertMail(incoming);
+    const created = store.createOutbound(id, "reply", "<stable@example.com>", Buffer.from("raw-message"));
+    expect(created).toMatchObject({ messageId: "<stable@example.com>", smtpAttempted: false, smtpAccepted: false, sentSaved: false });
+    store.markOutbound(id, "attempt");
+    expect(store.getOutbound(id)).toMatchObject({ smtpAttempted: true, smtpAccepted: false });
+    store.markOutbound(id, "smtp");
+    expect(store.getOutbound(id)).toMatchObject({ smtpAccepted: true, sentSaved: false });
+    store.markOutbound(id, "sent");
+    expect(store.getOutbound(id)).toMatchObject({ smtpAccepted: true, sentSaved: true, completed: false });
+    store.markOutbound(id, "complete");
+    expect(store.getOutbound(id)).toMatchObject({ completed: true });
+    expect(store.getOutbound(id)?.raw.toString()).toBe("raw-message");
   });
 });

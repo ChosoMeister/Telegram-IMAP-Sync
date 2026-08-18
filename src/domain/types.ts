@@ -1,5 +1,5 @@
 export type Importance = "critical" | "high" | "normal" | "low";
-export type MailState = "pending" | "processing" | "done" | "failed";
+export type MailState = "pending" | "processing" | "done" | "external_done" | "failed";
 
 export interface Address {
   name?: string;

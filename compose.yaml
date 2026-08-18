@@ -19,6 +19,11 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
 
 volumes:
   mailbot-data:

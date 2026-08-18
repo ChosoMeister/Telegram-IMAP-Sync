@@ -13,14 +13,30 @@ export class TelegramApi {
   private readonly base: string;
   constructor(private readonly config: AppConfig) { this.base = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}`; }
 
-  private async call<T>(method: string, body: Record<string, unknown>): Promise<T> {
-    const response = await fetch(`${this.base}/${method}`, {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body)
-    });
-    const json = await response.json() as { ok: boolean; result: T; description?: string };
-    if (!json.ok) throw new Error(`Telegram ${method}: ${json.description ?? response.status}`);
-    return json.result;
+  private async call<T>(method: string, body: Record<string, unknown>, retrySafe = true): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const response = await fetch(`${this.base}/${method}`, {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+          signal: AbortSignal.timeout(40_000)
+        });
+        const json = await response.json() as { ok: boolean; result: T; description?: string; parameters?: { retry_after?: number } };
+        if (json.ok) return json.result;
+        const retryAfter = json.parameters?.retry_after;
+        const retryable = response.status === 429 || (retrySafe && response.status >= 500);
+        if (!retryable || attempt === 3) throw new Error(`Telegram ${method}: ${json.description ?? response.status}`);
+        await this.delay((retryAfter ? retryAfter * 1000 : 500 * (2 ** attempt)) + Math.floor(Math.random() * 250));
+      } catch (error) {
+        lastError = error;
+        if (!retrySafe || attempt === 3 || (error instanceof Error && error.message.startsWith("Telegram "))) throw error;
+        await this.delay(500 * (2 ** attempt) + Math.floor(Math.random() * 250));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(`Telegram ${method} failed`);
   }
+
+  private delay(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
   getMe(): Promise<{ id: number; username?: string; is_bot: boolean }> { return this.call("getMe", {}); }
   getChat(): Promise<{ id: number; type: string }> { return this.call("getChat", { chat_id: this.config.TELEGRAM_USER_ID }); }
@@ -31,7 +47,7 @@ export class TelegramApi {
       chat_id: this.config.TELEGRAM_USER_ID, text, disable_notification: silent,
       parse_mode: "HTML", link_preview_options: { is_disabled: true },
       ...(forceReply ? { reply_markup: { force_reply: true, selective: true } } : buttons ? { reply_markup: { inline_keyboard: buttons } } : {})
-    });
+    }, false);
   }
 
   async editMessage(messageId: number, text: string, buttons?: Button[][]): Promise<TelegramMessage | boolean> {
@@ -50,14 +66,22 @@ export class TelegramApi {
   }
 
   async sendDocument(filename: string, content: Buffer, caption?: string): Promise<TelegramMessage> {
-    const form = new FormData();
-    form.set("chat_id", String(this.config.TELEGRAM_USER_ID));
-    if (caption) form.set("caption", caption);
-    form.set("document", new Blob([new Uint8Array(content)]), filename);
-    const response = await fetch(`${this.base}/sendDocument`, { method: "POST", body: form });
-    const json = await response.json() as { ok: boolean; result: TelegramMessage; description?: string };
-    if (!json.ok) throw new Error(`Telegram sendDocument: ${json.description ?? response.status}`);
-    return json.result;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const form = new FormData();
+      form.set("chat_id", String(this.config.TELEGRAM_USER_ID));
+      if (caption) form.set("caption", caption);
+      form.set("document", new Blob([new Uint8Array(content)]), filename);
+      const response = await fetch(`${this.base}/sendDocument`, {
+        method: "POST", body: form, signal: AbortSignal.timeout(120_000)
+      });
+      const json = await response.json() as {
+        ok: boolean; result: TelegramMessage; description?: string; parameters?: { retry_after?: number }
+      };
+      if (json.ok) return json.result;
+      if (response.status !== 429 || attempt === 3) throw new Error(`Telegram sendDocument: ${json.description ?? response.status}`);
+      await this.delay(((json.parameters?.retry_after ?? 1) * 1000) + Math.floor(Math.random() * 250));
+    }
+    throw new Error("Telegram sendDocument failed");
   }
 
   deleteMessages(ids: number[]): Promise<boolean> {

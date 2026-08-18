@@ -6,6 +6,9 @@ const schema = z.object({
   APP_MODE: z.enum(["live", "dry-run"]).default("dry-run"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   DATABASE_PATH: z.string().default("/data/mailbot.sqlite"),
+  BACKUP_DIR: z.string().default("/data/backups"),
+  BACKUP_INTERVAL_HOURS: z.coerce.number().int().min(1).default(24),
+  BACKUP_RETENTION: z.coerce.number().int().min(1).default(7),
   MAIL_RULES_PATH: z.string().optional(),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
 

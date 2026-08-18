@@ -15,8 +15,9 @@ export class SmtpService {
 
   async verify(): Promise<void> { await this.transporter.verify(); }
 
-  async buildReply(mail: StoredMail, draft: ReplyDraft): Promise<Buffer> {
+  async buildReply(mail: StoredMail, draft: ReplyDraft, messageId?: string): Promise<Buffer> {
     return new MailComposer({
+      ...(messageId ? { messageId } : {}),
       from: this.config.SMTP_FROM,
       to: draft.to.map(formatAddress), cc: draft.cc.map(formatAddress),
       subject: draft.subject, text: draft.text, html: draft.html,
@@ -34,7 +35,7 @@ export class SmtpService {
     return raw;
   }
 
-  async buildForward(mail: StoredMail, recipients: string[], note: string, source: Buffer): Promise<Buffer> {
+  async buildForward(mail: StoredMail, recipients: string[], note: string, source: Buffer, messageId?: string): Promise<Buffer> {
     const parsed = await simpleParser(source);
     const header = [
       "---------- Forwarded message ---------",
@@ -55,6 +56,7 @@ export class SmtpService {
       }] : [];
     });
     return new MailComposer({
+      ...(messageId ? { messageId } : {}),
       from: this.config.SMTP_FROM, to: recipients,
       subject: /^(?:fw|fwd):/i.test(mail.subject) ? mail.subject : `Fwd: ${mail.subject}`,
       text, html, attachments
@@ -66,6 +68,11 @@ export class SmtpService {
     const raw = await this.buildForward(mail, recipients, note, source);
     await this.transporter.sendMail({ envelope: { from: this.config.SMTP_FROM, to: recipients }, raw });
     return raw;
+  }
+
+  async sendRaw(recipients: string[], raw: Buffer): Promise<void> {
+    if (this.config.APP_MODE !== "live") throw new Error("SMTP sending is disabled in dry-run mode");
+    await this.transporter.sendMail({ envelope: { from: this.config.SMTP_FROM, to: recipients }, raw });
   }
 }
 

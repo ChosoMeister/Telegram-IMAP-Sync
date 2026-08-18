@@ -28,6 +28,12 @@ describe("reply builder", () => {
     expect(raw).toContain("Cc: team@example.com");
     expect(raw).toContain("In-Reply-To: <mail@example.com>");
   });
+  it("keeps an explicitly assigned Message-ID in the durable RFC822 payload", async () => {
+    const draft = buildReply(mail, "پاسخ نهایی", false, "me@example.com");
+    const raw = await new SmtpService(config).buildReply(mail, draft, "<mailbot-stable@example.com>");
+    const parsed = await simpleParser(raw);
+    expect(parsed.messageId).toBe("<mailbot-stable@example.com>");
+  });
   it("builds a forward with the user note, original body and real attachments", async () => {
     const source = await new MailComposer({
       from: "sender@example.com", to: "me@example.com", subject: "Invoice", text: "Original body",

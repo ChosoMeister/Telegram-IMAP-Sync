@@ -14,9 +14,14 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
     sendMessage: vi.fn().mockResolvedValue({ message_id: 200, chat: { id: 42 } }), editMessage: vi.fn().mockResolvedValue(true),
     sendDocument: vi.fn(), getUpdates: vi.fn()
   };
-  const imap = { archive, fetchAttachment: vi.fn(), scanInbox: vi.fn(), connect: vi.fn(), waitForChanges: vi.fn(), stop: vi.fn() };
-  const app = new MailBotApp(isolatedConfig, store, imap as any, {} as any, telegram as any, {} as any, new Logger("error"));
-  return { app, store, telegram, archive, id };
+  const imap = {
+    archive, fetchAttachment: vi.fn(), scanInbox: vi.fn().mockResolvedValue([]), connect: vi.fn(), waitForChanges: vi.fn(), stop: vi.fn(),
+    mailboxIdentity: vi.fn().mockReturnValue({ path: incoming.mailbox, uidValidity: incoming.uidValidity }), isConnected: vi.fn().mockReturnValue(true),
+    listInboxUids: vi.fn().mockResolvedValue(new Set([incoming.uid]))
+  };
+  const ai = { analyze: vi.fn().mockResolvedValue(undefined) };
+  const app = new MailBotApp(isolatedConfig, store, imap as any, {} as any, telegram as any, ai as any, new Logger("error"));
+  return { app, store, telegram, imap, archive, id };
 }
 
 describe("Done transaction", () => {
@@ -44,6 +49,17 @@ describe("Done transaction", () => {
     expect(s.store.getMail(s.id)?.state).toBe("pending");
     s.store.close();
   });
+  it("treats repeated Done callbacks as idempotent", async () => {
+    const s = setup();
+    (s.app as any).config.APP_MODE = "live";
+    s.store.setState(s.id, "done");
+    await (s.app as any).handleCallback("cb", `m:${s.id}:done`);
+    expect(s.archive).not.toHaveBeenCalled();
+    expect(s.telegram.answerCallbackQuery).toHaveBeenCalledWith("cb", "این ایمیل قبلاً انجام شده است");
+    expect(s.telegram.deleteMessages).toHaveBeenCalledWith([100, 101]);
+    expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([]);
+    s.store.close();
+  });
 });
 
 describe("pending queue rotation", () => {
@@ -58,6 +74,30 @@ describe("pending queue rotation", () => {
     expect(rendered[0]).toContain("Test");
     expect(rendered[1]).toContain("Newer");
     expect(s.telegram.sendMessage.mock.calls.every((call: any[]) => call[2] === true)).toBe(true);
+    s.store.close();
+  });
+});
+
+describe("incremental reconciliation recovery", () => {
+  it("republishes a persisted pending mail whose Telegram delivery was interrupted", async () => {
+    const s = setup();
+    s.store.setTelegramMessages(s.id, []);
+    await s.app.syncInbox(false);
+    expect(s.imap.scanInbox).toHaveBeenCalledWith(new Set([incoming.uid]));
+    expect(s.telegram.sendMessage).toHaveBeenCalledOnce();
+    expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([200]);
+    s.store.close();
+  });
+
+  it("removes a Telegram card after an external Inbox move is confirmed twice", async () => {
+    const s = setup();
+    s.imap.listInboxUids.mockResolvedValue(new Set());
+    await s.app.syncInbox(false);
+    expect(s.store.getMail(s.id)?.state).toBe("pending");
+    await s.app.syncInbox(false);
+    expect(s.store.getMail(s.id)?.state).toBe("external_done");
+    expect(s.telegram.deleteMessages).toHaveBeenCalledWith([100, 101]);
+    expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([]);
     s.store.close();
   });
 });
@@ -77,6 +117,16 @@ describe("single-card navigation", () => {
     expect(s.telegram.deleteMessages).toHaveBeenCalledWith([101]);
     expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([100]);
     expect(s.telegram.editMessage).toHaveBeenCalled();
+    s.store.close();
+  });
+
+  it("navigating another mail does not clear an existing reply draft", async () => {
+    const s = setup();
+    s.store.setConversation(42, s.id, "review", false, "formal", "First reply draft");
+    const other = s.store.upsertMail({ ...incoming, uid: 8, subject: "Other mail" });
+    s.store.setTelegramMessages(other.id, [102]);
+    await (s.app as any).showSummary(s.store.getMail(other.id));
+    expect(s.store.getConversation(42, s.id)?.draft).toBe("First reply draft");
     s.store.close();
   });
 });

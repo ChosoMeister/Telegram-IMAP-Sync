@@ -16,6 +16,8 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 8. Inline signature images referenced by CID are not presented as user attachments.
 9. Only the configured Telegram user ID can invoke actions.
 10. Destructive actions are unavailable while `APP_MODE=dry-run`.
+11. The exact outbound RFC822 payload and stable Message-ID are stored before SMTP; SMTP, Sent-copy, and completion stages are durable.
+12. If the process dies during an SMTP attempt, automatic resend is blocked unless the stable Message-ID is already found in Sent; this favors duplicate prevention over an unsafe blind retry.
 
 ## Telegram lifecycle
 
@@ -26,6 +28,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 - All Telegram message IDs belonging to a mail are tracked for Done cleanup.
 - Every 36 hours, the full pending queue is silently deleted and republished oldest-to-newest. This keeps the visual order stable and messages within Telegram's deletion window.
 - If the bot is offline beyond Telegram's deletion window, old content may not be deletable; this is a platform limitation.
+- Mail removed from Inbox by Outlook or another client is confirmed absent on two reconciliations, then its Telegram content is removed automatically.
 
 ## Reply lifecycle
 

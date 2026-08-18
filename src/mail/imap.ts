@@ -32,10 +32,27 @@ export class ImapService {
   }
 
   async connect(): Promise<void> {
+    if (this.client?.usable) return;
+    if (this.client) await this.client.logout().catch(() => undefined);
     this.client = this.createClient();
     this.client.on("error", (error) => this.logger.error("IMAP error", { error: error.message }));
     await this.client.connect();
     await this.client.mailboxOpen(this.config.IMAP_MAILBOX);
+  }
+
+  isConnected(): boolean { return Boolean(this.client?.usable && this.client.mailbox); }
+
+  mailboxIdentity(): { path: string; uidValidity: string } {
+    const client = this.requireClient();
+    if (!client.mailbox) throw new Error("IMAP mailbox is not open");
+    return { path: this.config.IMAP_MAILBOX, uidValidity: String(client.mailbox.uidValidity) };
+  }
+
+  async listInboxUids(): Promise<Set<number>> {
+    const client = this.requireClient();
+    const lock = await client.getMailboxLock(this.config.IMAP_MAILBOX);
+    try { return new Set((await client.search({ all: true }, { uid: true })) || []); }
+    finally { lock.release(); }
   }
 
   async ensureMailboxes(paths: string[]): Promise<void> {
@@ -73,15 +90,18 @@ export class ImapService {
     } finally { lock.release(); }
   }
 
-  async scanInbox(): Promise<IncomingMail[]> {
+  async scanInbox(knownUids: ReadonlySet<number> = new Set()): Promise<IncomingMail[]> {
     const client = this.requireClient();
     const lock = await client.getMailboxLock(this.config.IMAP_MAILBOX);
     try {
       const mailbox = client.mailbox;
       if (!mailbox || mailbox.exists === 0) return [];
+      const allUids = await client.search({ all: true }, { uid: true });
+      const candidateUids = (allUids || []).filter((uid) => !knownUids.has(uid));
+      const selectedUids = this.config.TEST_IMPORT_LIMIT > 0 ? candidateUids.slice(-this.config.TEST_IMPORT_LIMIT) : candidateUids;
+      if (!selectedUids.length) return [];
       const mails: IncomingMail[] = [];
-      const start = this.config.TEST_IMPORT_LIMIT > 0 ? Math.max(1, mailbox.exists - this.config.TEST_IMPORT_LIMIT + 1) : 1;
-      for await (const message of client.fetch(`${start}:*`, { uid: true, source: true })) {
+      for await (const message of client.fetch(selectedUids.join(","), { uid: true, source: true }, { uid: true })) {
         if (!message.source || !message.uid) continue;
         const parsed = await simpleParser(message.source);
         mails.push(parsedMailToIncoming(parsed, {
@@ -117,6 +137,19 @@ export class ImapService {
     if (!mailbox) throw new Error("Sent mailbox was not found; configure IMAP_SENT_MAILBOX");
     const result = await client.append(mailbox, content, ["\\Seen"], sentAt);
     if (!result) throw new Error("Exchange did not confirm saving the reply to Sent");
+  }
+
+  async sentContainsMessageId(messageId: string): Promise<boolean> {
+    const client = this.requireClient();
+    let mailbox = this.config.IMAP_SENT_MAILBOX;
+    if (!mailbox) mailbox = (await client.list()).find((box) => box.specialUse === "\\Sent")?.path;
+    if (!mailbox) return false;
+    const lock = await client.getMailboxLock(mailbox);
+    try {
+      const normalized = messageId.replace(/^<|>$/g, "");
+      const found = await client.search({ header: { "message-id": normalized } }, { uid: true });
+      return Boolean(found && found.length);
+    } finally { lock.release(); }
   }
 
   async fetchAttachment(mail: StoredMail, attachment: MailAttachment): Promise<Buffer> {

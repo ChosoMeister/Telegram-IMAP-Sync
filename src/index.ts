@@ -1,5 +1,5 @@
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { mkdir, readdir, stat, unlink } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { createServer } from "node:http";
 import { loadConfig } from "./config.js";
 import { Logger } from "./logger.js";
@@ -23,9 +23,27 @@ async function main(): Promise<void> {
   const rules = await MailRuleService.load(config.MAIL_RULES_PATH);
   const app = new MailBotApp(config, store, imap, smtp, telegram, ai, logger, rules);
 
+  const runBackup = async () => {
+    try {
+      await mkdir(config.BACKUP_DIR, { recursive: true });
+      const filename = `mailbot-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite`;
+      await store.backup(join(config.BACKUP_DIR, filename));
+      const files = (await readdir(config.BACKUP_DIR)).filter((name) => /^mailbot-.*\.sqlite$/.test(name));
+      const ordered = await Promise.all(files.map(async (name) => ({ name, modified: (await stat(join(config.BACKUP_DIR, name))).mtimeMs })));
+      for (const old of ordered.sort((a, b) => b.modified - a.modified).slice(config.BACKUP_RETENTION)) {
+        await unlink(join(config.BACKUP_DIR, old.name));
+      }
+      logger.info("SQLite online backup completed", { filename, retention: config.BACKUP_RETENTION });
+    } catch (error) {
+      logger.error("SQLite online backup failed", { error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
   const health = createServer((_request, response) => {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ ok: true, mode: config.APP_MODE, time: new Date().toISOString() }));
+    const status = app.status();
+    const ok = status.ok === true;
+    response.writeHead(ok ? 200 : 503, { "content-type": "application/json" });
+    response.end(JSON.stringify({ ...status, mode: config.APP_MODE, time: new Date().toISOString() }));
   });
   health.listen(config.HEALTH_PORT, "0.0.0.0");
 
@@ -41,6 +59,8 @@ async function main(): Promise<void> {
 
   logger.info("Starting Telegram IMAP Sync", { mode: config.APP_MODE, aiOrder: config.aiProviderOrder, mailRules: rules.count });
   await app.start();
+  await runBackup();
+  setInterval(() => void runBackup(), config.BACKUP_INTERVAL_HOURS * 3_600_000).unref();
 }
 
 main().catch((error) => {

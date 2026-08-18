@@ -6,7 +6,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 
 ## What is implemented
 
-- Full Inbox import plus continuous reconciliation
+- Full Inbox import plus lightweight UID reconciliation; MIME and attachments are fetched only for new messages
 - Stable IMAP deduplication using mailbox, UIDVALIDITY, and UID
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
@@ -20,7 +20,11 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
-- SQLite recovery state, health endpoint, structured redacted logs
+- Stable pre-send Message-ID and durable outbound RFC822 recovery state
+- Automatic IMAP reconnect with exponential backoff
+- Telegram rate-limit/transient-failure backoff without unsafe message-send retries
+- SQLite recovery state, IMAP-aware health endpoint, structured redacted logs
+- Online SQLite backups with configurable retention
 - Multi-architecture Docker design for Linux, macOS, and Windows hosts
 
 See [product specification](docs/SPEC.md) and [architecture](docs/ARCHITECTURE.md).
@@ -76,11 +80,15 @@ The health endpoint is exposed only on the local machine:
 http://127.0.0.1:18080/
 ```
 
+It returns HTTP `200` only while the IMAP connection is usable. During an Exchange disconnect it returns `503`; the service reconnects automatically with a capped exponential backoff and reconciles Inbox immediately after recovery.
+The JSON response also reports the last successful reconciliation, last Telegram poll, Inbox count, and state counts. Online backups are written under `/data/backups`; copy them to independent storage as part of host backup policy.
+
 ## Safe commissioning sequence
 
 1. Keep `APP_MODE=dry-run`.
 2. Validate IMAP/SMTP TLS and credentials without printing them.
 3. Discover live Exchange mailbox paths and choose the exact archive destination.
+   Confirm the actual Outlook sent-mail folder as well; Exchange commonly uses `Sent Items`, while a separate `Sent` folder may also exist.
 4. Start the service and verify read-only import with a single test email.
 5. Confirm Telegram user authorization, HTML extraction, AI fallback, and attachment filtering.
 6. Test SMTP reply to a controlled recipient and confirm the matching copy in `Sent` and Outlook threading.
