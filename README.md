@@ -11,6 +11,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
 - Persian priority, summary, suggested action, and deadline extraction
+- Enforced Persian administrative style: `با درود و مهر` / `با سپاس`, with deterministic post-processing if a model ignores the policy
 - HTML-to-text handling with same-card pagination and Back navigation
 - On-demand real attachments with inline signature-image filtering
 - Multi-signal separation of real attachments from CID images, logos, icons, and signature assets, with an on-demand hidden-file review
@@ -64,7 +65,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.3.0
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.3.1
 ```
 
 ## Windows installation (Docker Desktop)

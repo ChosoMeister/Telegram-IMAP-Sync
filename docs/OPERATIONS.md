@@ -94,4 +94,5 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Thread has unrelated messages:** repeated generic subjects can produce false candidates. Message-ID relationships are preferred; lower `THREAD_MAX_MESSAGES` and retain exact `References` headers when collecting a sanitized fixture.
 - **Ask AI reports unsupported attachment:** current extraction supports PDF, DOCX, HTML, and text/CSV-like formats. Images require OCR and legacy DOC/XLS or XLSX require a future isolated converter.
 - **AI job is failed:** health reports job counts and provider status. A background analysis becomes terminal after five provider failures; the email remains fully usable and interactive Ask AI can be retried later.
+- **AI returns the old greeting/closing:** version 0.3.1 normalizes generated output after the provider response. Confirm the running image/version and rebuild/redeploy; manually edited text is intentionally preserved verbatim.
 - **Restart loop:** inspect the first fatal log entry, validate `.env` with `docker compose config`, and test required destinations from inside the container.

@@ -30,6 +30,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - SQLite uses its online backup API; retention is applied inside `/data/backups` without copying a live WAL database file directly.
 - SMTP-success/Sent-copy-pending and Sent-copy-success/archive-pending are distinct states, so retries cannot duplicate the reply.
 - AI results are optional and can be regenerated after restart.
+- AI output passes through a provider-independent Persian style normalizer; therefore fallback-provider changes cannot reintroduce disallowed greetings or closings.
 - AI analysis jobs are leased from SQLite; abandoned leases return to the queue and repeated provider failures are bounded.
 - Legacy Inbox payloads missing attachment classification are refetched once and their existing Telegram cards are edited in place.
 - Thread lookup temporarily opens Inbox/Archive/Sent mailboxes and restores the configured Inbox before normal reconciliation resumes.

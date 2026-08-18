@@ -65,6 +65,8 @@ Unknown providers in `AI_PROVIDER_ORDER` fail that attempt and allow the next pr
 
 Ask AI supports the current email, its real extractable attachments, or its thread. Extractable formats are PDF, DOCX, HTML, TXT, CSV, TSV, JSON, XML, and log/text MIME types. Unsupported and oversized files are named in the context with a reason rather than parsed. Files are processed in memory and are not persisted by the extractor.
 
+The Persian administrative wording policy is intentionally not configurable per provider: every configured model receives the same instruction and every generated result is normalized before use. Manual edits entered in Telegram bypass this normalization and remain verbatim.
+
 ## Production minimum
 
 Set real values for IMAP, SMTP, Telegram, archive, and sent-mail settings; set `TEST_IMPORT_LIMIT=0`. Run `npm run discover` and `npm run preflight` in the built container before switching `APP_MODE=live`. Keep `.env`, `config/mail-rules.json`, and backup files outside Git.

@@ -60,6 +60,8 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 
 Providers are ordered through `AI_PROVIDER_ORDER`, for example `proxy,ollama` or `ollama,proxy`. Both analysis and reply drafting use the same fallback chain. Failure of every provider leaves the email usable without analysis. Email contents are never logged.
 
+All user-visible AI values use polished administrative Persian. Generated mail must use `با درود و مهر` instead of `با سلام و احترام`/`با سلام`, and `با سپاس` instead of `با تشکر`. The system prompt states this policy for every provider, and a deterministic output normalizer enforces the replacements and Persian `ی`/`ک` before display or sending. Direct manual edits remain exactly as entered by the user.
+
 The analysis contract is JSON containing importance, score, Persian summary, suggested action, optional deadline, and reason. Email content is untrusted data and must not override the system prompt.
 
 Background analysis is a durable SQLite job. A crash releases an expired lease for retry; provider failures use bounded exponential delay and become terminal after five attempts. Interactive questions remain recoverable through the persisted Telegram update offset and conversation state.

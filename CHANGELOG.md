@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 - 2026-08-19
+
+- Enforce polished administrative Persian across analysis, Reply, Forward, Thread summary, and Ask AI.
+- Require `با درود و مهر` instead of `با سلام و احترام`/`با سلام` and `با سپاس` instead of `با تشکر`.
+- Add deterministic output normalization so local and organizational models follow the same wording even when prompt compliance fails.
+- Normalize Arabic `ي` and `ك` glyphs to Persian `ی` and `ک` in AI-generated text.
+- Keep direct user edits untouched and retain the no-signature policy.
+
 ## 0.3.0 - 2026-08-19
 
 - Classify MIME attachments as real, inline, signature, or uncertain using CID, HTML references, names, type, size, and dimensions while recording SHA-256 metadata.

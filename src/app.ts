@@ -489,7 +489,7 @@ export class MailBotApp {
         await this.telegram.sendMessage("❌ آدرس معتبر پیدا نشد. نمونه: colleague@example.com", undefined, true);
         return;
       }
-      let draft = "جهت بررسی و اقدام ارسال می‌شود.";
+      let draft = "با درود و مهر\n\nجهت بررسی و اقدام ارسال می‌شود.\n\nبا سپاس";
       try { draft = await this.ai.draftForward(mail, "", conversation.tone); } catch { /* safe fallback */ }
       const metadata = { kind: "forward", recipients };
       this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", false, conversation.tone, draft, metadata);

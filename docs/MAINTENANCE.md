@@ -8,6 +8,7 @@ For every behavior or configuration change:
 2. Update `.env.example` and `docs/CONFIGURATION.md` together for configuration changes.
 3. Update `docs/SPEC.md` for user-visible lifecycle or invariant changes.
 4. Update `docs/ARCHITECTURE.md` for state, adapter, recovery, or security changes.
+   AI prompt changes must retain deterministic Persian-style regression tests, not rely on prompt compliance alone.
 5. Update `docs/OPERATIONS.md` for deployment, migration, health, backup, or troubleshooting changes.
 6. Add sanitized MIME regression fixtures for any attachment-classification change; cover false-positive and false-negative cases.
 7. Keep `README.md` and `README.fa.md` aligned on features, safety gates, and links.
