@@ -10,6 +10,7 @@ import type { TelegramApi, TelegramMessage, TelegramUpdate } from "./telegram/ap
 import { esc } from "./telegram/api.js";
 import { mailButtons, renderMail } from "./telegram/render.js";
 import { splitTelegramText } from "./mail/content.js";
+import type { MailRuleService } from "./rules.js";
 
 export class MailBotApp {
   private syncRunning = false;
@@ -17,11 +18,13 @@ export class MailBotApp {
   private readonly aiInFlight = new Set<number>();
   constructor(
     private config: AppConfig, private store: Store, private imap: ImapService,
-    private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger
+    private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger,
+    private rules?: MailRuleService
   ) {}
 
   async start(): Promise<void> {
     await this.imap.connect();
+    await this.imap.ensureMailboxes(this.rules?.destinations() ?? []);
     await this.syncInbox(this.config.TELEGRAM_INITIAL_IMPORT_SILENT);
     void this.pollTelegram();
     void this.imap.waitForChanges(() => this.syncInbox(false));
@@ -38,6 +41,24 @@ export class MailBotApp {
       const newMail: StoredMail[] = [];
       for (const incoming of await this.imap.scanInbox()) {
         const result = this.store.upsertMail(incoming);
+        const rule = this.rules?.match(incoming);
+        const ruleAppliedKey = rule ? `mail-rule:${result.id}:${rule.name}` : undefined;
+        if (rule && (!rule.actions.copyTo || this.store.getKv(ruleAppliedKey!) !== "applied")) {
+          const mail = this.store.getMail(result.id)!;
+          try {
+            await this.imap.applyRule(mail, rule);
+            if (ruleAppliedKey) this.store.setKv(ruleAppliedKey, "applied");
+            this.logger.info("Mail rule applied", { mailId: mail.id, rule: rule.name, destination: rule.actions.moveTo ?? rule.actions.copyTo ?? "flags-only" });
+            if (rule.actions.moveTo) {
+              if (mail.telegramMessageIds.length) await this.telegram.deleteMessages(mail.telegramMessageIds).catch(() => false);
+              this.store.setTelegramMessages(mail.id, []);
+              this.store.setState(mail.id, "done");
+              continue;
+            }
+          } catch (error) {
+            this.logger.warn("Mail rule failed; keeping message actionable", { mailId: mail.id, rule: rule.name, error: error instanceof Error ? error.message : String(error) });
+          }
+        }
         if (!result.created) {
           const existing = this.store.getMail(result.id)!;
           if (!existing.telegramMessageIds.length) await this.publish(existing, silent);

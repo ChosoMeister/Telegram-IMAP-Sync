@@ -9,6 +9,7 @@ import { ImapService } from "./mail/imap.js";
 import { SmtpService } from "./mail/smtp.js";
 import { TelegramApi } from "./telegram/api.js";
 import { MailBotApp } from "./app.js";
+import { MailRuleService } from "./rules.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -19,7 +20,8 @@ async function main(): Promise<void> {
   const smtp = new SmtpService(config);
   const telegram = new TelegramApi(config);
   const ai = new AiService(config, logger);
-  const app = new MailBotApp(config, store, imap, smtp, telegram, ai, logger);
+  const rules = await MailRuleService.load(config.MAIL_RULES_PATH);
+  const app = new MailBotApp(config, store, imap, smtp, telegram, ai, logger, rules);
 
   const health = createServer((_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
@@ -37,7 +39,7 @@ async function main(): Promise<void> {
   process.once("SIGINT", () => void shutdown("SIGINT"));
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-  logger.info("Starting Telegram IMAP Sync", { mode: config.APP_MODE, aiOrder: config.aiProviderOrder });
+  logger.info("Starting Telegram IMAP Sync", { mode: config.APP_MODE, aiOrder: config.aiProviderOrder, mailRules: rules.count });
   await app.start();
 }
 

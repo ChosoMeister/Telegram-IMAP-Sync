@@ -17,6 +17,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Pending queue rotation every 36 hours, oldest-to-newest and silent
 - AI-assisted Reply and Reply All with tone, custom instruction, direct editing, and explicit approval
 - AI-assisted Forward to one or more recipients with a custom note and original attachments
+- Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
 - SQLite recovery state, health endpoint, structured redacted logs

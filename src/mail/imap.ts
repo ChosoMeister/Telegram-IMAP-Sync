@@ -3,6 +3,7 @@ import { simpleParser } from "mailparser";
 import type { AppConfig } from "../config.js";
 import type { IncomingMail, MailAttachment, StoredMail } from "../domain/types.js";
 import type { Logger } from "../logger.js";
+import type { MailRule } from "../rules.js";
 import { parsedMailToIncoming } from "./content.js";
 
 export class ImapService {
@@ -35,6 +36,41 @@ export class ImapService {
     this.client.on("error", (error) => this.logger.error("IMAP error", { error: error.message }));
     await this.client.connect();
     await this.client.mailboxOpen(this.config.IMAP_MAILBOX);
+  }
+
+  async ensureMailboxes(paths: string[]): Promise<void> {
+    if (this.config.APP_MODE !== "live" || !paths.length) return;
+    const client = this.requireClient();
+    const existing = new Set((await client.list()).map((box) => box.path.toLowerCase()));
+    const expanded = new Set<string>();
+    for (const path of paths) {
+      const parts = path.split("/");
+      for (let index = 1; index <= parts.length; index++) expanded.add(parts.slice(0, index).join("/"));
+    }
+    for (const path of [...expanded].sort((a, b) => a.split("/").length - b.split("/").length)) {
+      if (!existing.has(path.toLowerCase())) {
+        await client.mailboxCreate(path);
+        existing.add(path.toLowerCase());
+      }
+    }
+  }
+
+  async applyRule(mail: StoredMail, rule: MailRule): Promise<void> {
+    if (this.config.APP_MODE !== "live") throw new Error("Mail rules are disabled in dry-run mode");
+    const client = this.requireClient();
+    const lock = await client.getMailboxLock(mail.mailbox);
+    try {
+      const query = { uid: mail.uid };
+      const addFlags = [rule.actions.markRead ? "\\Seen" : undefined, rule.actions.flagged === true ? "\\Flagged" : undefined].filter((value): value is string => Boolean(value));
+      if (addFlags.length) await client.messageFlagsAdd(query, addFlags, { uid: true });
+      if (rule.actions.flagged === false) await client.messageFlagsRemove(query, ["\\Flagged"], { uid: true });
+      if (rule.actions.copyTo) await client.messageCopy(query, rule.actions.copyTo, { uid: true });
+      if (rule.actions.moveTo) {
+        await client.messageMove(query, rule.actions.moveTo, { uid: true });
+        const remains = await client.search(query, { uid: true });
+        if (remains && remains.length) throw new Error("Rule move was not verified; message remains in Inbox");
+      }
+    } finally { lock.release(); }
   }
 
   async scanInbox(): Promise<IncomingMail[]> {

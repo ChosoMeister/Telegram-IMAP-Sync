@@ -1,7 +1,7 @@
 # Architecture
 
 ```text
-Exchange IMAP ──> reconciliation/IDLE ──> MIME normalization ──> SQLite
+Exchange IMAP ──> reconciliation/IDLE ──> local mail rules ──> MIME normalization ──> SQLite
                                                                │
                                   AI providers <────────────────┤
                                                                │

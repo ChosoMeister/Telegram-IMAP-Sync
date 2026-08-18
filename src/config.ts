@@ -6,6 +6,7 @@ const schema = z.object({
   APP_MODE: z.enum(["live", "dry-run"]).default("dry-run"),
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
   DATABASE_PATH: z.string().default("/data/mailbot.sqlite"),
+  MAIL_RULES_PATH: z.string().optional(),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
 
   IMAP_HOST: z.string().min(1),

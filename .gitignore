@@ -7,3 +7,4 @@ data/
 !.env.example
 *.log
 .DS_Store
+config/mail-rules.json
