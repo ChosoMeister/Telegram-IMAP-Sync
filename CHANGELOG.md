@@ -4,6 +4,7 @@
 
 - Detect calendar messages deterministically from `text/calendar` even when Exchange names the part `attachment-1`.
 - Parse ICS method, status, title, description, organizer, attendees, start/end, location, URL, and common Exchange/IANA time zones.
+- Handle quoted Outlook timezone parameters containing a colon, including `(UTC+03:30) Tehran`.
 - Render dedicated Persian invitation/update/cancellation cards and bypass misleading generic AI summaries for calendar mail.
 - Exclude ICS payloads from normal and hidden attachment counts while retaining their structured data for AI context.
 - Refetch legacy pending calendar messages once so existing Telegram cards are corrected in place.

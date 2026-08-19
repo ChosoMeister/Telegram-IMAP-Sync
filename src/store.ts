@@ -301,7 +301,7 @@ export class Store {
       .all(mailbox, uidValidity) as unknown as Array<{ uid: number; payload_json: string }>;
     return new Set(rows.filter((row) => {
       const payload = JSON.parse(row.payload_json) as IncomingMail;
-      const needsCalendarRefresh = payload.attachments.some((attachment) => attachment.contentType.toLowerCase() === "text/calendar") && !payload.calendar;
+      const needsCalendarRefresh = payload.attachments.some((attachment) => attachment.contentType.toLowerCase() === "text/calendar") && payload.calendar?.parserVersion !== 1;
       return !needsCalendarRefresh && payload.attachments.every((attachment) => Boolean(attachment.classification));
     }).map((row) => row.uid));
   }

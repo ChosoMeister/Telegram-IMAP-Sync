@@ -22,6 +22,7 @@ export interface MailAttachment {
 }
 
 export interface CalendarEvent {
+  parserVersion?: number;
   method?: string;
   uid?: string;
   status?: string;

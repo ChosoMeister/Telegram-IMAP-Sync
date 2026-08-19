@@ -2,6 +2,7 @@ import type { Address, CalendarEvent } from "../domain/types.js";
 
 const windowsZones: Record<string, string> = {
   "iran standard time": "Asia/Tehran",
+  "(utc+03:30) tehran": "Asia/Tehran",
   "utc": "UTC"
 };
 
@@ -21,6 +22,7 @@ export function parseCalendar(content: Buffer | string): CalendarEvent | undefin
   const organizer = address(property(event, "ORGANIZER"));
   const attendees = event.filter((line) => key(line) === "ATTENDEE").map(address).filter((item): item is Address => Boolean(item));
   return {
+    parserVersion: 1,
     ...(method ? { method: method.toUpperCase() } : {}),
     ...(uid ? { uid } : {}),
     ...(status ? { status: status.toUpperCase() } : {}),
@@ -46,7 +48,7 @@ function between(lines: string[], start: string, end: string): string[] {
 function key(line: string): string { return line.split(/[;:]/, 1)[0]!.toUpperCase(); }
 function property(lines: string[], name: string): string | undefined { return lines.find((line) => key(line) === name); }
 function value(lines: string[], name: string): string | undefined {
-  const line = property(lines, name); const colon = line?.indexOf(":") ?? -1;
+  const line = property(lines, name); const colon = line ? valueDelimiter(line) : -1;
   return colon >= 0 ? line!.slice(colon + 1) : undefined;
 }
 function decode(value: string): string {
@@ -54,7 +56,7 @@ function decode(value: string): string {
 }
 function address(line?: string): Address | undefined {
   if (!line) return undefined;
-  const colon = line.indexOf(":");
+  const colon = valueDelimiter(line);
   const email = (colon >= 0 ? line.slice(colon + 1) : line).replace(/^mailto:/i, "").trim();
   if (!email) return undefined;
   const cn = /(?:^|;)CN=(?:"([^"]+)"|([^;:]+))/i.exec(line);
@@ -63,7 +65,7 @@ function address(line?: string): Address | undefined {
 }
 function calendarDate(line?: string): CalendarEvent["start"] | undefined {
   if (!line) return undefined;
-  const colon = line.indexOf(":"); if (colon < 0) return undefined;
+  const colon = valueDelimiter(line); if (colon < 0) return undefined;
   const raw = line.slice(colon + 1).trim();
   const requestedZone = /(?:^|;)TZID=(?:"([^"]+)"|([^;:]+))/i.exec(line);
   const originalZone = requestedZone?.[1] ?? requestedZone?.[2];
@@ -82,4 +84,13 @@ function calendarDate(line?: string): CalendarEvent["start"] | undefined {
     } catch { return { raw, timeZone }; }
   }
   return { raw, iso: new Date(epoch).toISOString(), ...(timeZone ? { timeZone } : {}) };
+}
+
+function valueDelimiter(line: string): number {
+  let quoted = false;
+  for (let index = 0; index < line.length; index++) {
+    if (line[index] === '"' && line[index - 1] !== "\\") quoted = !quoted;
+    else if (line[index] === ":" && !quoted) return index;
+  }
+  return -1;
 }
