@@ -75,7 +75,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 
 ## AI
 
-Providers are ordered through `AI_PROVIDER_ORDER`, for example `proxy,ollama` or `ollama,proxy`. Both analysis and reply drafting use the same fallback chain. Failure of every provider leaves the email usable without analysis. Email contents are never logged.
+Providers are ordered through `AI_PROVIDER_ORDER`, for example `proxy,ollama` or `ollama,proxy`. A proxy can contain an ordered model fallback through `AI_PROXY_MODEL_ORDER`. Analysis, Reply, Forward, and Ask AI use the same chain. Failure of every model/provider leaves the email usable without analysis. Email contents are never logged.
 
 All user-visible AI values use polished administrative Persian. Generated mail must use `با درود و مهر` instead of `با سلام و احترام`/`با سلام`, and `با سپاس` instead of `با تشکر`. The system prompt states this policy for every provider, and a deterministic output normalizer enforces the replacements and Persian `ی`/`ک` before display or sending. The model must not infer gender: unknown recipients receive neutral wording, while optional verified per-address titles may be configured locally. Direct manual edits remain exactly as entered by the user.
 

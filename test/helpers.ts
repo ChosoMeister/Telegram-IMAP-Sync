@@ -11,7 +11,7 @@ export const config: AppConfig = {
   TELEGRAM_BOT_TOKEN: "1234567890:test", TELEGRAM_USER_ID: 42, TELEGRAM_REFRESH_HOURS: 36, TELEGRAM_INITIAL_IMPORT_SILENT: false,
   AI_PROVIDER_ORDER: "ollama,proxy", AI_TIMEOUT_MS: 1000, AI_CONTEXT_MAX_CHARS: 60_000, AI_ATTACHMENT_MAX_BYTES: 10_000_000, OLLAMA_BASE_URL: "http://localhost:11434", OLLAMA_MODEL: "test",
   AI_PROXY_MODEL: "test", AI_ENABLED: true,
-  aiProviderOrder: ["ollama", "proxy"]
+  aiProviderOrder: ["ollama", "proxy"], aiProxyModelOrder: ["test"]
 };
 
 export const incoming: IncomingMail = {

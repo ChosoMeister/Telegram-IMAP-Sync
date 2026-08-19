@@ -83,14 +83,14 @@ class OllamaProvider implements Provider {
 }
 
 class OpenAiProvider implements Provider {
-  name = "proxy";
-  constructor(private config: AppConfig) {}
+  readonly name: string;
+  constructor(private config: AppConfig, private model: string) { this.name = `proxy:${model}`; }
   async complete(system: string, user: string): Promise<string> {
     if (!this.config.AI_PROXY_BASE_URL || !this.config.AI_PROXY_API_KEY) throw new Error("AI proxy is not configured");
     const json = await postJson(`${this.config.AI_PROXY_BASE_URL.replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${this.config.AI_PROXY_API_KEY}` },
-      body: JSON.stringify({ model: this.config.AI_PROXY_MODEL, temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, { role: "user", content: user }] })
+      body: JSON.stringify({ model: this.model, temperature: 0.2, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, { role: "user", content: user }] })
     }, this.config.AI_TIMEOUT_MS);
     return json.choices?.[0]?.message?.content ?? "";
   }
@@ -100,8 +100,12 @@ export class AiService {
   private providers: Provider[];
   private readonly health = new Map<string, { ok: boolean; lastSuccess?: string; lastError?: string }>();
   constructor(private config: AppConfig, private logger: Logger, private honorifics: HonorificDirectory = {}, private userProfile?: UserProfile) {
-    const available: Record<string, Provider> = { ollama: new OllamaProvider(config), proxy: new OpenAiProvider(config) };
-    this.providers = config.aiProviderOrder.map((name) => available[name]).filter((p): p is Provider => Boolean(p));
+    const ollama = new OllamaProvider(config);
+    this.providers = config.aiProviderOrder.flatMap((name): Provider[] => {
+      if (name === "ollama") return [ollama];
+      if (name === "proxy") return config.aiProxyModelOrder.map((model) => new OpenAiProvider(config, model));
+      return [];
+    });
     for (const provider of this.providers) this.health.set(provider.name, { ok: true });
   }
 

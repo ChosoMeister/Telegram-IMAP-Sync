@@ -67,8 +67,9 @@ The variables below define the primary account. Additional accounts use the same
 | `AI_PROXY_BASE_URL` | unset | OpenAI-compatible base URL ending in `/v1`. |
 | `AI_PROXY_API_KEY` | unset | Proxy bearer key. |
 | `AI_PROXY_MODEL` | `gpt-oss-120b` | Proxy model name. |
+| `AI_PROXY_MODEL_ORDER` | value of `AI_PROXY_MODEL` | Ordered models on the same proxy; for example `gpt-oss-120b,gemma4-26b`. |
 
-Unknown providers in `AI_PROVIDER_ORDER` fail that attempt and allow the next provider. If all providers fail, Telegram receives the usable email card without AI enrichment.
+Unknown providers in `AI_PROVIDER_ORDER` are ignored. A `proxy` entry expands to every model in `AI_PROXY_MODEL_ORDER`; timeout, HTTP failure, invalid JSON, or schema failure advances to the next model. If all models/providers fail, Telegram receives the usable email card without AI enrichment.
 
 Ask AI supports the current email, its real extractable attachments, or its thread. Extractable formats are PDF, DOCX, HTML, TXT, CSV, TSV, JSON, XML, and log/text MIME types. Unsupported and oversized files are named in the context with a reason rather than parsed. Files are processed in memory and are not persisted by the extractor.
 

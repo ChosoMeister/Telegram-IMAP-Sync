@@ -52,15 +52,17 @@ const schema = z.object({
   AI_PROXY_BASE_URL: z.string().url().optional(),
   AI_PROXY_API_KEY: z.string().optional(),
   AI_PROXY_MODEL: z.string().default("gpt-oss-120b"),
+  AI_PROXY_MODEL_ORDER: z.string().optional(),
   AI_ENABLED: bool.default(true)
 });
 
-export type AppConfig = z.infer<typeof schema> & { aiProviderOrder: string[] };
+export type AppConfig = z.infer<typeof schema> & { aiProviderOrder: string[]; aiProxyModelOrder: string[] };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = schema.parse(env);
   return {
     ...parsed,
-    aiProviderOrder: parsed.AI_PROVIDER_ORDER.split(",").map((v) => v.trim()).filter(Boolean)
+    aiProviderOrder: parsed.AI_PROVIDER_ORDER.split(",").map((v) => v.trim()).filter(Boolean),
+    aiProxyModelOrder: (parsed.AI_PROXY_MODEL_ORDER || parsed.AI_PROXY_MODEL).split(",").map((v) => v.trim()).filter(Boolean)
   };
 }

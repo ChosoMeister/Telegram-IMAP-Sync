@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1 - 2026-08-19
+
+- Add ordered fallback across multiple models exposed by one OpenAI-compatible AI proxy.
+- Record health and the selected model separately as `proxy:<model>`.
+- Configure GPT-OSS 120B as the quality-first primary and Gemma 4 26B as the faster fallback after production-compatible Persian analysis benchmarks.
+
 ## 0.8.0 - 2026-08-19
 
 - Add a single-process Multi-IMAP/SMTP All Inbox with one Telegram update dispatcher.

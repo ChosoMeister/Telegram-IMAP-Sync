@@ -29,6 +29,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Gender-neutral AI addressing by default, with optional verified per-address Persian honorifics
 - Optional local owner profile so AI recognizes the user across their names and email addresses and renders self-assigned work as a direct `Your action`
 - Multi-server All Inbox through one Telegram bot, with every reply, forward, RSVP, Sent copy, and Archive action routed through the receiving account
+- Ordered fallback across multiple models on the same organizational AI proxy
 - Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
@@ -74,7 +75,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.8.0
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.8.1
 ```
 
 ## Windows installation (Docker Desktop)
