@@ -64,6 +64,9 @@ function renderCalendarMail(mail: StoredMail, thread: StoredMail[]): string {
     : mail.from.map((item) => item.name ? `${item.name} <${item.address}>` : item.address).join(", ") || "نامشخص";
   const type = event.method === "CANCEL" || event.status === "CANCELLED" ? "لغو رویداد" : event.method === "REPLY" ? "پاسخ به دعوت" : "دعوت تقویم";
   const action = event.method === "CANCEL" || event.status === "CANCELLED" ? "بررسی لغو یا تغییر برنامه" : "بررسی زمان رویداد و پاسخ به دعوت";
+  const attendeeLimit = 20;
+  const attendeeLines = event.attendees.slice(0, attendeeLimit).map((attendee) => `• ${attendee.name || "نام ثبت نشده"}`);
+  if (event.attendees.length > attendeeLimit) attendeeLines.push(`• و ${event.attendees.length - attendeeLimit} نفر دیگر`);
   return [
     `📅 <b>${type}</b>`,
     thread.length > 1 ? `\n<b>🧵 مکالمه:</b> ${thread.length} پیام در Inbox` : "",
@@ -73,7 +76,7 @@ function renderCalendarMail(mail: StoredMail, thread: StoredMail[]): string {
     event.end ? `<b>پایان:</b> ${esc(formatCalendarDate(event.end))}` : "",
     event.location ? `<b>محل/جلسه:</b> ${esc(event.location)}` : "",
     event.url ? `<b>پیوند:</b> ${esc(event.url)}` : "",
-    event.attendees.length ? `<b>شرکت‌کنندگان:</b> ${event.attendees.length} نفر` : "",
+    event.attendees.length ? `<b>شرکت‌کنندگان (${event.attendees.length} نفر):</b>\n${esc(attendeeLines.join("\n"))}` : "",
     event.description ? `\n<b>توضیحات رویداد:</b>\n${esc(event.description.slice(0, 1200))}` : mail.text ? `\n<b>متن همراه:</b>\n${esc(mail.text.slice(0, 1200))}` : "",
     `\n<b>اقدام پیشنهادی:</b>\n${action}`
   ].filter(Boolean).join("\n");

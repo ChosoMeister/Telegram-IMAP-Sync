@@ -8,6 +8,7 @@
 - Render dedicated Persian invitation/update/cancellation cards and bypass misleading generic AI summaries for calendar mail.
 - Exclude ICS payloads from normal and hidden attachment counts while retaining their structured data for AI context.
 - Refetch legacy pending calendar messages once so existing Telegram cards are corrected in place.
+- List attendee names without email addresses on calendar cards, with a safe display cap for unusually large invitations.
 
 ## 0.4.1 - 2026-08-19
 
