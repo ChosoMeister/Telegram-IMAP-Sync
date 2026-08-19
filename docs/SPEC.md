@@ -43,6 +43,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 2. The first click opens a same-card confirmation screen; only explicit final confirmation creates one durable RFC 5546 `METHOD:REPLY` with matching UID/Sequence and attendee `PARTSTAT`.
 3. The exact RFC822 payload is persisted before SMTP, sent only to Organizer, appended to Sent, and then all pending Inbox members are archived.
 4. The Telegram card is removed only after every stage succeeds. Failure leaves the invitation visible with a retry for the incomplete response; ambiguous SMTP results are never blindly resent.
+5. Calendar cards deliberately hide generic Reply, Reply All, Forward, and Message text actions. Valid requests show only RSVP plus Done/Ask AI; cancellations and non-actionable calendar payloads show only Done/Ask AI.
 - All Telegram message IDs belonging to a mail are tracked for Done cleanup.
 - Every 36 hours, the full pending queue is silently refreshed oldest-to-newest. Each replacement card is sent and persisted before the previous card is deleted, avoiding a gap if Telegram delivery fails and preserving visual order.
 - If the bot is offline beyond Telegram's deletion window, old content may not be deletable; this is a platform limitation.

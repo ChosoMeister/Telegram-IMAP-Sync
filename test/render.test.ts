@@ -49,7 +49,10 @@ describe("mail card buttons", () => {
     expect(rendered).not.toContain("خلاصه اشتباه");
     expect(rendered).not.toContain("پیوست اصلی");
     expect(mailButtons(mail).flat().map((button) => button.text).join(" ")).not.toContain("موارد مخفی");
-    expect(mailButtons(mail).flat().map((button) => button.text)).toEqual(expect.arrayContaining(["✅ قبول", "❔ شاید", "❌ رد"]));
+    expect(mailButtons(mail).map((row) => row.map((button) => button.text))).toEqual([
+      ["✅ قبول", "❔ شاید", "❌ رد"],
+      ["✅ انجام شد", "✨ پرسش از AI"]
+    ]);
   });
 
   it("scores calendar urgency deterministically from response need and start time", () => {
@@ -57,5 +60,12 @@ describe("mail card buttons", () => {
     expect(calendarImportance({ method: "REQUEST", attendees: [], start: { raw: "", iso: "2026-08-20T09:00:00.000Z" } }, now)).toEqual({ importance: "critical", score: 95 });
     expect(calendarImportance({ method: "REQUEST", attendees: [], start: { raw: "", iso: "2026-08-21T10:00:00.000Z" } }, now)).toEqual({ importance: "high", score: 80 });
     expect(calendarImportance({ method: "CANCEL", attendees: [] }, now)).toEqual({ importance: "low", score: 20 });
+  });
+
+  it("shows only Done and Ask AI for a cancelled calendar event", () => {
+    const mail: StoredMail = { ...stored(1), calendar: { method: "CANCEL", status: "CANCELLED", attendees: [] } };
+    expect(mailButtons(mail).map((row) => row.map((button) => button.text))).toEqual([
+      ["✅ انجام شد", "✨ پرسش از AI"]
+    ]);
   });
 });

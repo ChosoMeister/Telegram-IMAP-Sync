@@ -7,6 +7,7 @@
 - Preserve UID, Sequence, recurrence identity, attendee identity, and PARTSTAT in the iTIP reply.
 - Reuse durable SMTP, Sent APPEND, Archive, atomic-lock, and duplicate-prevention stages; invitations stay Pending until completion.
 - Score calendar importance deterministically from cancellation/past state, response requirement, and proximity to the event instead of generic AI analysis.
+- Simplify calendar UX to RSVP plus Done/Ask AI, removing misleading generic Reply, Reply All, Forward, and body actions.
 
 ## 0.5.0 - 2026-08-19
 

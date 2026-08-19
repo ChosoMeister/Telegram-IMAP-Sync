@@ -33,15 +33,23 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
 export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
   const id = mail.id;
   type Button = { text: string; callback_data: string; style?: "danger" | "success" | "primary" };
+  if (mail.calendar) {
+    const calendarRows: Button[][] = [];
+    if (mail.calendar.method === "REQUEST" && mail.calendar.uid && mail.calendar.organizer?.address && mail.calendar.status !== "CANCELLED") calendarRows.push([
+      { text: "✅ قبول", callback_data: `m:${id}:calaccept`, style: "success" },
+      { text: "❔ شاید", callback_data: `m:${id}:caltentative`, style: "primary" },
+      { text: "❌ رد", callback_data: `m:${id}:caldecline`, style: "danger" }
+    ]);
+    calendarRows.push([
+      { text: "✅ انجام شد", callback_data: `m:${id}:done`, style: "success" },
+      { text: "✨ پرسش از AI", callback_data: `m:${id}:ask`, style: "primary" }
+    ]);
+    return calendarRows;
+  }
   const rows: Button[][] = [[
     { text: "↩️ پاسخ", callback_data: `m:${id}:reply`, style: "primary" },
     { text: "✅ انجام شد", callback_data: `m:${id}:done`, style: "success" }
   ]];
-  if (mail.calendar?.method === "REQUEST" && mail.calendar.uid && mail.calendar.organizer?.address && mail.calendar.status !== "CANCELLED") rows.unshift([
-    { text: "✅ قبول", callback_data: `m:${id}:calaccept`, style: "success" },
-    { text: "❔ شاید", callback_data: `m:${id}:caltentative`, style: "primary" },
-    { text: "❌ رد", callback_data: `m:${id}:caldecline`, style: "danger" }
-  ]);
   const secondary: Button[] = [{ text: "↪️ فوروارد", callback_data: `m:${id}:forward` }];
   if (mail.cc.length || mail.to.length > 1) secondary.push({ text: "👥 پاسخ به همه", callback_data: `m:${id}:replyall` });
   rows.push(secondary);
