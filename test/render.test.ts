@@ -21,6 +21,11 @@ describe("mail card buttons", () => {
     expect(rows[3]?.map((button) => button.text)).toEqual(["✨ پرسش از AI"]);
   });
 
+  it("labels an action assigned to the profile owner as a direct user action", () => {
+    const mail = { ...stored(1), analysis: { importance: "high" as const, score: 80, summaryFa: "خلاصه", suggestedAction: "شما بررسی کنید", reason: "درخواست مستقیم", provider: "test", actionOwner: "self" as const } };
+    expect(renderMail(mail)).toContain("<b>اقدام شما:</b>");
+  });
+
   it("uses Persian conditional Reply All and counts secondary content", () => {
     const mail = { ...stored(1), attachments: [
       { id: "a", filename: "file.pdf", contentType: "application/pdf", size: 1, disposition: "attachment", isRealAttachment: true },

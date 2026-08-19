@@ -65,6 +65,7 @@ export interface Analysis {
   deadline?: string;
   reason: string;
   provider: string;
+  actionOwner?: "self" | "other" | "shared" | "unknown";
 }
 
 export interface StoredMail extends IncomingMail {

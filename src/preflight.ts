@@ -4,6 +4,7 @@ import { TelegramApi } from "./telegram/api.js";
 import { AiService } from "./ai.js";
 import type { StoredMail } from "./domain/types.js";
 import { loadHonorifics } from "./honorifics.js";
+import { loadUserProfile } from "./user-profile.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -19,7 +20,7 @@ async function main(): Promise<void> {
       from: [{ address: "sender@example.invalid" }], to: [{ address: config.SMTP_FROM }], cc: [], replyTo: [],
       receivedAt: new Date(), text: "این یک پیام ساختگی برای تست اتصال مدل است. لطفاً اهمیت آن را تحلیل کن.", attachments: []
     };
-    const analysis = await new AiService(config, new Logger(config.LOG_LEVEL), await loadHonorifics(config.HONORIFICS_PATH)).analyze(sample);
+    const analysis = await new AiService(config, new Logger(config.LOG_LEVEL), await loadHonorifics(config.HONORIFICS_PATH), await loadUserProfile(config.USER_PROFILE_PATH)).analyze(sample);
     ai = analysis ? { enabled: true, ok: true, provider: analysis.provider } : { enabled: true, ok: false };
   }
 

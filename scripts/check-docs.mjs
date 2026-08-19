@@ -4,7 +4,8 @@ import { stdout } from "node:process";
 const requiredDocs = [
   "README.md", "README.fa.md", "CHANGELOG.md", ".env.example",
   "docs/CONFIGURATION.md", "docs/OPERATIONS.md", "docs/MAIL_RULES.md",
-  "docs/SPEC.md", "docs/ARCHITECTURE.md", "docs/MAINTENANCE.md"
+  "docs/SPEC.md", "docs/ARCHITECTURE.md", "docs/MAINTENANCE.md",
+  "docs/MULTI_ACCOUNT_DESIGN.md"
 ];
 
 await Promise.all(requiredDocs.map((path) => access(path)));

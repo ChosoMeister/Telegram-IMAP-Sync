@@ -36,6 +36,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - Calendar Accept/Tentative/Decline reuses the same durable outbound stages and atomic lock; the stored iTIP response fixes UID, Sequence, Organizer, attendee, and PARTSTAT across retries.
 - AI results are optional and can be regenerated after restart.
 - AI output passes through a provider-independent Persian style normalizer; therefore fallback-provider changes cannot reintroduce disallowed greetings or closings.
+- Optional trusted owner identity is added to AI context. Analysis records whether an action belongs to self, another person, both, or is unknown; a deterministic alias-aware pass prevents the owner from being presented in third person.
 - Reply output also passes through a gender-safety normalizer: it strips unverified gendered titles and applies only an optional exact email-address override.
 - AI analysis jobs are leased from SQLite; abandoned leases return to the queue and repeated provider failures are bounded.
 - Legacy Inbox payloads missing attachment classification are refetched once and their existing Telegram cards are edited in place.
@@ -51,3 +52,4 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - The default public Bot API accepts files up to 50 MB. The current requirement is at most 25 MB.
 - PDF/DOCX extraction parses untrusted documents in memory. Independent file/context limits reduce resource exposure, but document analysis should still be enabled only for trusted organizational mail flows.
 - The service uses Node's built-in SQLite API, which Node 22 still labels experimental; the database format itself is standard SQLite and online backups are used for recovery.
+- The current runtime has one IMAP/SMTP account. The account-scoped migration required for a combined multi-server Inbox is specified in [Multi-account design](MULTI_ACCOUNT_DESIGN.md); it must not be approximated by running two containers against one Telegram bot token.

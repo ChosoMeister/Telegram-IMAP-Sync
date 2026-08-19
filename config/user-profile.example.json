@@ -1,0 +1,20 @@
+{
+  "displayNameFa": "نام و نام خانوادگی",
+  "displayNameEn": "First Last",
+  "nameAliases": [
+    "نام جایگزین فارسی",
+    "F. Last"
+  ],
+  "identities": [
+    {
+      "email": "user@company.example",
+      "organization": "Company",
+      "jobTitle": "Job title"
+    },
+    {
+      "email": "user@second-company.example",
+      "organization": "Second Company",
+      "jobTitle": "Second job title"
+    }
+  ]
+}

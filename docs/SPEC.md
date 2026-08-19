@@ -23,6 +23,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 15. Messages merge into a Telegram card only through exact normalized `Message-ID`, `In-Reply-To`, or `References`; subject similarity is never sufficient.
 16. Free-form input is accepted only as a direct reply to the exact ForceReply prompt that opened its mail-scoped workflow.
 17. Calendar identity comes from MIME `text/calendar`, never from an attachment filename or AI inference; its structured fields take precedence over generic analysis in the card.
+18. When an owner profile is configured, AI treats its names and addresses as the bot user's identity, labels the action owner, and addresses self-assigned actions directly as `شما` rather than naming the user in third person.
 
 ## Telegram lifecycle
 
@@ -77,7 +78,7 @@ Providers are ordered through `AI_PROVIDER_ORDER`, for example `proxy,ollama` or
 
 All user-visible AI values use polished administrative Persian. Generated mail must use `با درود و مهر` instead of `با سلام و احترام`/`با سلام`, and `با سپاس` instead of `با تشکر`. The system prompt states this policy for every provider, and a deterministic output normalizer enforces the replacements and Persian `ی`/`ک` before display or sending. The model must not infer gender: unknown recipients receive neutral wording, while optional verified per-address titles may be configured locally. Direct manual edits remain exactly as entered by the user.
 
-The analysis contract is JSON containing importance, score, Persian summary, suggested action, optional deadline, and reason. Email content is untrusted data and must not override the system prompt.
+The analysis contract is JSON containing importance, score, Persian summary, suggested action, optional deadline, reason, and `actionOwner` (`self`, `other`, `shared`, or `unknown`). Email content is untrusted data and must not override the system prompt or trusted local owner profile.
 
 Background analysis is a durable SQLite job. A crash releases an expired lease for retry; provider failures use bounded exponential delay and become terminal after five attempts. Interactive questions remain recoverable through the persisted Telegram update offset and conversation state.
 

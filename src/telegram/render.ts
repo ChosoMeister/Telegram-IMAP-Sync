@@ -1,4 +1,4 @@
-import type { StoredMail } from "../domain/types.js";
+import type { Analysis, StoredMail } from "../domain/types.js";
 import { esc } from "./api.js";
 
 const badge = { critical: "🔴", high: "🟠", normal: "🟡", low: "🟢" } as const;
@@ -23,7 +23,7 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
     `<b>موضوع:</b> ${esc(mail.subject)}`,
     `<b>زمان:</b> ${esc(formatDate(mail.receivedAt))}`,
     ``,
-    a ? `<b>${thread.length > 1 ? "خلاصه آخرین پیام" : "خلاصه AI"}:</b>\n${esc(a.summaryFa)}\n\n<b>اقدام پیشنهادی:</b>\n${esc(a.suggestedAction)}` : `<i>ایمیل بدون انتظار برای AI دریافت شد؛ نتیجه بعداً افزوده می‌شود.</i>`,
+    a ? `<b>${thread.length > 1 ? "خلاصه آخرین پیام" : "خلاصه AI"}:</b>\n${esc(a.summaryFa)}\n\n<b>${actionLabel(a.actionOwner)}:</b>\n${esc(a.suggestedAction)}` : `<i>ایمیل بدون انتظار برای AI دریافت شد؛ نتیجه بعداً افزوده می‌شود.</i>`,
     timeline ? `\n<b>روند مکالمه:</b>\n${timeline}` : "",
     real.length ? `\n\n📎 ${real.length} پیوست اصلی — ${formatSize(real.reduce((n, x) => n + x.size, 0))}` : "",
     hidden.length ? `🖼 ${hidden.length} تصویر درون‌متن/امضا مخفی شد` : ""
@@ -118,6 +118,12 @@ function formatCalendarDate(value: NonNullable<NonNullable<StoredMail["calendar"
 
 function importanceFa(value: keyof typeof badge): string {
   return ({ critical: "خیلی مهم", high: "مهم", normal: "عادی", low: "کم‌اهمیت" })[value];
+}
+function actionLabel(owner: Analysis["actionOwner"]): string {
+  if (owner === "self") return "اقدام شما";
+  if (owner === "shared") return "اقدام مشترک";
+  if (owner === "other") return "اقدام مورد انتظار از دیگران";
+  return "اقدام پیشنهادی";
 }
 function formatSize(bytes: number): string { return bytes < 1_000_000 ? `${Math.ceil(bytes / 1000)} KB` : `${(bytes / 1_000_000).toFixed(1)} MB`; }
 function formatDate(value: Date): string { return new Intl.DateTimeFormat("fa-IR", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Tehran" }).format(value); }

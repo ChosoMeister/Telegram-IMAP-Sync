@@ -15,6 +15,7 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `DATA_RETENTION_DAYS` | `90` | Deletes only completed local SQLite records after this age; Exchange messages remain untouched. |
 | `MAIL_RULES_PATH` | unset | JSON rule file, normally `/app/config/mail-rules.json`. |
 | `HONORIFICS_PATH` | unset | Optional JSON map of lowercase email addresses to verified `خانم` or `آقای`; normally `/app/config/honorifics.json`. Unknown people are addressed neutrally. |
+| `USER_PROFILE_PATH` | unset | Optional ignored JSON profile, normally `/app/config/user-profile.json`, that identifies the mailbox owner to AI. Copy `config/user-profile.example.json`; include all of the owner's addresses and common name spellings, but never credentials. |
 | `HEALTH_PORT` | `8080` | Container health/status HTTP port. Compose exposes it as loopback port 18080. |
 
 ## IMAP and SMTP
@@ -68,8 +69,10 @@ Ask AI supports the current email, its real extractable attachments, or its thre
 
 The Persian administrative wording policy is intentionally not configurable per provider: every configured model receives the same instruction and every generated result is normalized before use. Reply drafts never infer gender. Copy `config/honorifics.example.json` to the ignored `config/honorifics.json` only for people whose title is known and verified. Manual edits entered in Telegram bypass this normalization and remain verbatim.
 
+Copy `config/user-profile.example.json` to the ignored `config/user-profile.json` and set `USER_PROFILE_PATH` to enable owner awareness. `displayNameFa`, optional English name, aliases, and every owned email address are trusted identity context. Organization and job title are optional. The analyzer classifies the action owner as self, other, shared, or unknown; self actions are rendered as `اقدام شما` and use direct second-person wording. A deterministic post-processor also replaces profile-name references in suggested actions if a model ignores the instruction. The profile is not an authentication source and must never contain a password or token.
+
 Calendar detection, event fields, RSVP validity, and urgency scores do not depend on AI configuration. A calendar RSVP requires `SMTP_FROM` to match an Attendee address and uses the same SMTP, Sent, and Archive settings as a normal reply.
 
 ## Production minimum
 
-Set real values for IMAP, SMTP, Telegram, archive, and sent-mail settings; set `TEST_IMPORT_LIMIT=0`. Run `npm run discover` and `npm run preflight` in the built container before switching `APP_MODE=live`. Keep `.env`, `config/mail-rules.json`, `config/honorifics.json`, and backup files outside Git.
+Set real values for IMAP, SMTP, Telegram, archive, and sent-mail settings; set `TEST_IMPORT_LIMIT=0`. Run `npm run discover` and `npm run preflight` in the built container before switching `APP_MODE=live`. Keep `.env`, `config/mail-rules.json`, `config/honorifics.json`, `config/user-profile.json`, and backup files outside Git.

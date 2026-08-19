@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 - 2026-08-19
+
+- Add an optional ignored owner profile containing names, aliases, owned addresses, organization, and job-title context without credentials.
+- Extend AI analysis with explicit self/other/shared/unknown action ownership and direct second-person Persian wording for the owner.
+- Add deterministic profile-alias normalization so a noncompliant model cannot keep presenting the owner as a third person.
+- Label self and shared work clearly on Telegram cards and document the planned account-scoped Multi-IMAP All Inbox architecture.
+
 ## 0.6.0 - 2026-08-19
 
 - Add real RFC 5546 Accept, Tentative, and Decline responses addressed to the event Organizer.

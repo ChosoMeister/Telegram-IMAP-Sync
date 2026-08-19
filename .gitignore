@@ -9,3 +9,4 @@ data/
 .DS_Store
 config/mail-rules.json
 config/honorifics.json
+config/user-profile.json
