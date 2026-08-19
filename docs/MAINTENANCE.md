@@ -11,6 +11,7 @@ For every behavior or configuration change:
    AI prompt changes must retain deterministic Persian-style regression tests, not rely on prompt compliance alone.
 5. Update `docs/OPERATIONS.md` for deployment, migration, health, backup, or troubleshooting changes.
 6. Add sanitized MIME regression fixtures for any attachment-classification change; cover false-positive and false-negative cases.
+   Calendar changes must additionally cover filename-independent MIME detection, quoted Outlook time zones, RSVP MIME/UID/Sequence/PARTSTAT, confirmation, and failure-stage retention.
 7. Keep `README.md` and `README.fa.md` aligned on features, safety gates, and links.
 8. Add a dated `CHANGELOG.md` entry for a release.
 9. Run `npm run check`, `npm audit --omit=dev`, `docker compose config --quiet`, and a tracked-tree secret/confidentiality scan.

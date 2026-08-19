@@ -26,7 +26,7 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `IMAP_SECURE` | `true` | TLS from connection start. |
 | `IMAP_USER`, `IMAP_PASSWORD` | required | IMAP credentials. |
 | `IMAP_MAILBOX` | `INBOX` | Watched actionable mailbox. |
-| `IMAP_ARCHIVE_MAILBOX` | required for live completion | Existing destination used by Done/Reply/Forward completion. Discover the exact server path first. |
+| `IMAP_ARCHIVE_MAILBOX` | required for live completion | Existing destination used by Done/Reply/Forward/calendar-RSVP completion. Discover the exact server path first. |
 | `IMAP_SENT_MAILBOX` | auto-discovered if unset | Mailbox receiving the exact accepted outbound copy; commonly `Sent Items`. Explicit configuration is safer. |
 | `IMAP_RECONCILE_SECONDS` | `300` | Full Inbox reconciliation interval; minimum 30. |
 | `TEST_IMPORT_LIMIT` | `0` | Test-only newest-message limit. Production must use `0`. |
@@ -67,6 +67,8 @@ Unknown providers in `AI_PROVIDER_ORDER` fail that attempt and allow the next pr
 Ask AI supports the current email, its real extractable attachments, or its thread. Extractable formats are PDF, DOCX, HTML, TXT, CSV, TSV, JSON, XML, and log/text MIME types. Unsupported and oversized files are named in the context with a reason rather than parsed. Files are processed in memory and are not persisted by the extractor.
 
 The Persian administrative wording policy is intentionally not configurable per provider: every configured model receives the same instruction and every generated result is normalized before use. Reply drafts never infer gender. Copy `config/honorifics.example.json` to the ignored `config/honorifics.json` only for people whose title is known and verified. Manual edits entered in Telegram bypass this normalization and remain verbatim.
+
+Calendar detection, event fields, RSVP validity, and urgency scores do not depend on AI configuration. A calendar RSVP requires `SMTP_FROM` to match an Attendee address and uses the same SMTP, Sent, and Archive settings as a normal reply.
 
 ## Production minimum
 

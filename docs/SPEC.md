@@ -18,7 +18,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 10. Destructive actions are unavailable while `APP_MODE=dry-run`.
 11. The exact outbound RFC822 payload and stable Message-ID are stored before SMTP; SMTP, Sent-copy, and completion stages are durable.
 12. If the process dies during an SMTP attempt, automatic resend is blocked unless the stable Message-ID is already found in Sent; this favors duplicate prevention over an unsafe blind retry.
-13. Done, Reply, and Forward acquire an expiring atomic per-mail lock before mutation.
+13. Done, Reply, Forward, and calendar RSVP acquire an expiring atomic per-mail lock before mutation.
 14. Images classified as inline/signature/uncertain are excluded from the primary attachment count and Forward, but remain explicitly reviewable by the user.
 15. Messages merge into a Telegram card only through exact normalized `Message-ID`, `In-Reply-To`, or `References`; subject similarity is never sufficient.
 16. Free-form input is accepted only as a direct reply to the exact ForceReply prompt that opened its mail-scoped workflow.
@@ -34,7 +34,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 - `Hidden images` retrieves signature/inline/uncertain images only on demand; Back removes those temporary Telegram messages.
 - `Ask AI` accepts a free-form question scoped to the current mail, extractable real attachments, or the discovered thread, and renders the answer on the same card.
 - The summary card itself is the pending thread view, so it has no redundant `Thread` button. `Ask AI > whole thread` still searches Inbox, configured/discovered Archive, and configured/discovered Sent only by exact Message-ID relationships.
-- A calendar message has a dedicated Persian card showing event type, title, organizer address, Tehran start/end, location or link, attendee count, description, and a deterministic action. Its ICS payload is not counted as a normal or hidden attachment. Invitations remain actionable until the user completes them.
+- A calendar message has a dedicated Persian card showing event type, title, organizer address, Tehran start/end, location or link, attendee names (email only as a missing-name fallback), description, and a deterministic action. Its ICS payload is not counted as a normal or hidden attachment. Invitations remain actionable until the user completes them.
 - Calendar priority is deterministic and cannot be overridden by AI: cancelled/past events are low; unanswered requests within 24 hours are critical, within 72 hours high, within seven days normal with a higher score, and later requests normal.
 
 ## Calendar response lifecycle

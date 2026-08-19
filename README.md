@@ -1,6 +1,6 @@
 # Telegram IMAP Sync
 
-A self-hosted, single-user action inbox that mirrors an Exchange Inbox to Telegram. It supports local/organizational AI analysis, full-text retrieval, on-demand attachments, safe Done/archive, and AI-assisted Reply/Reply All.
+A self-hosted, single-user action inbox that mirrors an Exchange Inbox to Telegram. It supports local/organizational AI analysis, full-text retrieval, on-demand attachments, safe Done/archive, AI-assisted Reply/Reply All, and transactional Exchange calendar RSVP.
 
 The project is currently safe to configure and test, but defaults to `APP_MODE=dry-run`. Do not enable live actions until the Exchange folder discovery checklist has been completed.
 
@@ -14,6 +14,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Persian priority, summary, suggested action, and deadline extraction
 - Deterministic `text/calendar` detection with structured Persian event cards for invitations, updates, and cancellations, independent of attachment filename
 - Exchange-compatible Accept/Tentative/Decline responses with durable SMTP, Sent-copy, Archive, and Telegram cleanup stages plus deterministic deadline-based calendar priority
+- Calendar-specific mobile UI: RSVP plus Done/Ask AI only, with same-card final confirmation before sending
 - Enforced Persian administrative style: `با درود و مهر` / `با سپاس`, with deterministic post-processing if a model ignores the policy
 - HTML-to-text handling with same-card pagination for the latest message or every merged Inbox message, plus Back navigation
 - On-demand real attachments with inline signature-image filtering
