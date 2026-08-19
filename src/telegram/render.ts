@@ -19,6 +19,7 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
     `${a ? badge[a.importance] : "⚪️"} <b>${a ? `${importanceFa(a.importance)} — ${a.score}/100` : "در انتظار تحلیل AI"}</b>`,
     ``,
     thread.length > 1 ? `<b>🧵 مکالمه:</b> ${thread.length} پیام در Inbox` : "",
+    mail.accountLabel ? `<b>حساب:</b> ${esc(mail.accountLabel)}` : "",
     `<b>آخرین فرستنده:</b> ${esc(from)}`,
     `<b>موضوع:</b> ${esc(mail.subject)}`,
     `<b>زمان:</b> ${esc(formatDate(mail.receivedAt))}`,
@@ -84,6 +85,7 @@ function renderCalendarMail(mail: StoredMail, thread: StoredMail[]): string {
   return [
     `${badge[priority.importance]} <b>${importanceFa(priority.importance)} — ${priority.score}/100</b>`,
     `\n📅 <b>${type}</b>`,
+    mail.accountLabel ? `\n<b>حساب:</b> ${esc(mail.accountLabel)}` : "",
     thread.length > 1 ? `\n<b>🧵 مکالمه:</b> ${thread.length} پیام در Inbox` : "",
     `\n<b>عنوان:</b> ${esc(event.summary || mail.subject)}`,
     `<b>برگزارکننده:</b> ${esc(organizer)}`,

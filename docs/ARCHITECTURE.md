@@ -1,7 +1,7 @@
 # Architecture
 
 ```text
-Exchange IMAP ──> reconciliation/IDLE ──> MIME + attachment/calendar classification ──> local mail rules ──> SQLite
+IMAP account runtimes ──> reconciliation/IDLE ──> MIME + attachment/calendar classification ──> scoped rules ──> SQLite
                                                                │
                                   AI providers <────────────────┤
                                                                │
@@ -52,4 +52,4 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - The default public Bot API accepts files up to 50 MB. The current requirement is at most 25 MB.
 - PDF/DOCX extraction parses untrusted documents in memory. Independent file/context limits reduce resource exposure, but document analysis should still be enabled only for trusted organizational mail flows.
 - The service uses Node's built-in SQLite API, which Node 22 still labels experimental; the database format itself is standard SQLite and online backups are used for recovery.
-- The current runtime has one IMAP/SMTP account. The account-scoped migration required for a combined multi-server Inbox is specified in [Multi-account design](MULTI_ACCOUNT_DESIGN.md); it must not be approximated by running two containers against one Telegram bot token.
+- Independent IMAP/SMTP accounts share one Telegram dispatcher. Mail identity and RFC thread keys are account-scoped, and every outbound or mailbox action resolves the immutable account on the stored mail row. See [Multi-account design](MULTI_ACCOUNT_DESIGN.md).

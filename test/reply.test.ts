@@ -15,6 +15,10 @@ describe("reply builder", () => {
     expect(draft.subject).toBe("Re: Test");
     expect(draft.html).toContain("تأیید است");
   });
+  it("excludes every configured own account from Reply All", () => {
+    const draft = buildReply({ ...mail, to: [{ address: "me@example.com" }, { address: "me@secondary.example" }] }, "تأیید است", true, ["me@example.com", "me@secondary.example"]);
+    expect(draft.cc.map((item) => item.address)).not.toContain("me@secondary.example");
+  });
   it("adds no signature markup or trailing whitespace", () => {
     const draft = buildReply(mail, "پاسخ نهایی", false, "me@example.com");
     expect(draft.text).toBe("پاسخ نهایی");

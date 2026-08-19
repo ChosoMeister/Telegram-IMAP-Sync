@@ -10,3 +10,4 @@ data/
 config/mail-rules.json
 config/honorifics.json
 config/user-profile.json
+config/account-*.env

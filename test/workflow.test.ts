@@ -37,6 +37,19 @@ describe("Done transaction", () => {
     expect(s.store.getMail(s.id)?.state).toBe("done");
     s.store.close();
   });
+  it("routes an action to the account that received the mail", async () => {
+    const s = setup();
+    const secondaryArchive = vi.fn().mockResolvedValue(undefined);
+    const secondaryImap = { ...s.imap, archiveMany: secondaryArchive };
+    (s.app as any).accounts.push({ id: "secondary", label: "Secondary", config: { ...config, SMTP_FROM: "me@secondary.example" }, imap: secondaryImap, smtp: s.smtp });
+    const secondary = s.store.upsertMail({ ...incoming, uid: 99, accountId: "secondary", accountLabel: "Secondary" });
+    s.store.setTelegramMessages(secondary.id, [300]);
+    (s.app as any).config.APP_MODE = "live";
+    await (s.app as any).handleCallback("cb-secondary", `m:${secondary.id}:done`);
+    expect(secondaryArchive).toHaveBeenCalledOnce();
+    expect(s.archive).not.toHaveBeenCalled();
+    s.store.close();
+  });
   it("keeps Telegram content and marks failure when archive fails", async () => {
     const s = setup(vi.fn().mockRejectedValue(new Error("move failed")));
     (s.app as any).config.APP_MODE = "live";
@@ -160,7 +173,7 @@ describe("pending queue rotation", () => {
 describe("incremental reconciliation recovery", () => {
   it("marks health stale when Telegram polling has stopped for two minutes", () => {
     const s = setup();
-    (s.app as any).lastSuccessfulSync = new Date();
+    (s.app as any).lastSuccessfulSync.set("primary", new Date());
     (s.app as any).lastTelegramPoll = new Date(Date.now() - 121_000);
     expect(s.app.isHealthy()).toBe(false);
     (s.app as any).lastTelegramPoll = new Date();

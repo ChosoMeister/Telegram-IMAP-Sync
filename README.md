@@ -28,6 +28,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Thread discovery across Inbox, Archive, and Sent with AI status summary and thread-aware reply drafts
 - Gender-neutral AI addressing by default, with optional verified per-address Persian honorifics
 - Optional local owner profile so AI recognizes the user across their names and email addresses and renders self-assigned work as a direct `Your action`
+- Multi-server All Inbox through one Telegram bot, with every reply, forward, RSVP, Sent copy, and Archive action routed through the receiving account
 - Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
@@ -46,7 +47,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - [Operations runbook](docs/OPERATIONS.md) — deploy, upgrade, backup, restore, health, and troubleshooting
 - [Mail rules](docs/MAIL_RULES.md) — optional local routing before Telegram delivery
 - [Product specification](docs/SPEC.md) and [architecture](docs/ARCHITECTURE.md)
-- [Multi-account / All Inbox design](docs/MULTI_ACCOUNT_DESIGN.md) — planned account-scoped IMAP/SMTP architecture
+- [Multi-account / All Inbox design](docs/MULTI_ACCOUNT_DESIGN.md) — account-scoped IMAP/SMTP architecture and rollout
 - [Release and documentation checklist](docs/MAINTENANCE.md)
 - [راهنمای فارسی](README.fa.md)
 
@@ -73,7 +74,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.7.0
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.8.0
 ```
 
 ## Windows installation (Docker Desktop)

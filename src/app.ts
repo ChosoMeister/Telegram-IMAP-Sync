@@ -15,32 +15,37 @@ import { canExtractAttachment, extractAttachmentText } from "./mail/extract.js";
 import type { MailRuleService } from "./rules.js";
 import { randomUUID } from "node:crypto";
 import { describeError } from "./errors.js";
+import type { MailAccountRuntime } from "./accounts.js";
 
 export class MailBotApp {
   private readonly startedAt = new Date();
   private syncRunning = false;
   private stopping = false;
-  private imapSupervisorRunning = false;
-  private lastSuccessfulSync?: Date;
+  private readonly imapSupervisorRunning = new Set<string>();
+  private readonly lastSuccessfulSync = new Map<string, Date>();
   private lastTelegramPoll?: Date;
-  private inboxCount = 0;
+  private readonly inboxCount = new Map<string, number>();
+  private readonly accounts: MailAccountRuntime[];
   private jobWorkerRunning = false;
   private cardsVerified = false;
   constructor(
     private config: AppConfig, private store: Store, private imap: ImapService,
     private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger,
-    private rules?: MailRuleService
-  ) {}
+    private rules?: MailRuleService, additionalAccounts: MailAccountRuntime[] = []
+  ) {
+    this.accounts = [{ id: config.PRIMARY_ACCOUNT_ID, label: config.PRIMARY_ACCOUNT_LABEL, config, imap, smtp }, ...additionalAccounts];
+  }
 
   async start(): Promise<void> {
-    await this.imap.connect();
-    await this.imap.ensureMailboxes(this.rules?.destinations() ?? []);
-    void this.smtp.verify().catch((error) => this.logger.warn("SMTP verification failed; inbound mail remains available", {
-      error: error instanceof Error ? error.message : String(error)
-    }));
+    for (const account of this.accounts) {
+      await this.connectAccount(account).catch((error) => this.logger.warn("Mail account startup deferred to reconnect supervisor", { accountId: account.id, error: describeError(error) }));
+      void account.smtp.verify().catch((error) => this.logger.warn("SMTP verification failed; inbound mail remains available", {
+        accountId: account.id, error: error instanceof Error ? error.message : String(error)
+      }));
+    }
     await this.syncInbox(this.config.TELEGRAM_INITIAL_IMPORT_SILENT);
     void this.pollTelegram();
-    void this.superviseImap();
+    for (const account of this.accounts) void this.superviseImap(account);
     setInterval(() => void this.syncInbox(false), this.config.IMAP_RECONCILE_SECONDS * 1000).unref();
     setInterval(() => void this.rotatePending(), 60 * 60 * 1000).unref();
     setInterval(() => void this.processJobs(), 2_000).unref();
@@ -52,72 +57,91 @@ export class MailBotApp {
     setInterval(purge, 24 * 60 * 60 * 1000).unref();
   }
 
-  async stop(): Promise<void> { this.stopping = true; await this.imap.stop(); }
+  async stop(): Promise<void> { this.stopping = true; await Promise.all(this.accounts.map((account) => account.imap.stop())); }
 
   isHealthy(): boolean {
     const now = Date.now();
-    const syncFresh = Boolean(this.lastSuccessfulSync && now - this.lastSuccessfulSync.getTime() < Math.max(this.config.IMAP_RECONCILE_SECONDS * 3_000, 120_000));
+    const syncFresh = this.accounts.every((account) => {
+      const last = this.lastSuccessfulSync.get(account.id);
+      return Boolean(last && now - last.getTime() < Math.max(this.config.IMAP_RECONCILE_SECONDS * 3_000, 120_000));
+    });
     const telegramFresh = this.lastTelegramPoll
       ? now - this.lastTelegramPoll.getTime() < 120_000
       : now - this.startedAt.getTime() < 90_000;
-    return !this.stopping && this.imap.isConnected() && syncFresh && telegramFresh;
+    return !this.stopping && this.accounts.every((account) => account.imap.isConnected()) && syncFresh && telegramFresh;
   }
 
   status(): Record<string, unknown> {
     return {
-      ok: this.isHealthy(), imapConnected: this.imap.isConnected(), syncRunning: this.syncRunning,
-      lastSuccessfulSync: this.lastSuccessfulSync?.toISOString(), lastTelegramPoll: this.lastTelegramPoll?.toISOString(),
-      inboxCount: this.inboxCount, jobs: this.store.jobCounts(), ai: this.ai.status(), smtp: this.smtp.status(), telegram: this.telegram.status(),
+      ok: this.isHealthy(), imapConnected: this.accounts.every((account) => account.imap.isConnected()), syncRunning: this.syncRunning,
+      accounts: Object.fromEntries(this.accounts.map((account) => [account.id, { label: account.label, imapConnected: account.imap.isConnected(), lastSuccessfulSync: this.lastSuccessfulSync.get(account.id)?.toISOString(), inboxCount: this.inboxCount.get(account.id) ?? 0, smtp: account.smtp.status() }])),
+      lastTelegramPoll: this.lastTelegramPoll?.toISOString(), inboxCount: [...this.inboxCount.values()].reduce((sum, count) => sum + count, 0),
+      jobs: this.store.jobCounts(), ai: this.ai.status(), smtp: this.smtp.status(), telegram: this.telegram.status(),
       backup: { lastSuccess: this.store.getKv("backup:last-success"), lastError: this.store.getKv("backup:last-error") }, ...this.store.counts()
     };
   }
 
-  private async superviseImap(): Promise<void> {
-    if (this.imapSupervisorRunning) return;
-    this.imapSupervisorRunning = true;
+  private async connectAccount(account: MailAccountRuntime): Promise<void> {
+    await account.imap.connect();
+    if (account.id === this.config.PRIMARY_ACCOUNT_ID) await account.imap.ensureMailboxes(this.rules?.destinations() ?? []);
+  }
+
+  private async superviseImap(account: MailAccountRuntime): Promise<void> {
+    if (this.imapSupervisorRunning.has(account.id)) return;
+    this.imapSupervisorRunning.add(account.id);
     let retryMs = 1000;
     try {
       while (!this.stopping) {
         try {
-          if (!this.imap.isConnected()) {
-            await this.imap.connect();
-            await this.imap.ensureMailboxes(this.rules?.destinations() ?? []);
-            this.logger.info("IMAP connection restored");
+          if (!account.imap.isConnected()) {
+            await this.connectAccount(account);
+            this.logger.info("IMAP connection restored", { accountId: account.id });
             await this.syncInbox(false);
           }
           retryMs = 1000;
-          await this.imap.waitForChanges(() => this.syncInbox(false));
+          await account.imap.waitForChanges(() => this.syncInbox(false));
           if (!this.stopping) throw new Error("IMAP connection closed");
         } catch (error) {
           if (this.stopping) break;
           this.logger.warn("IMAP disconnected; reconnect scheduled", {
-            retryMs,
+            accountId: account.id, retryMs,
             error: error instanceof Error ? error.message : String(error)
           });
           await new Promise((resolve) => setTimeout(resolve, retryMs));
           retryMs = Math.min(retryMs * 2, 30_000);
         }
       }
-    } finally { this.imapSupervisorRunning = false; }
+    } finally { this.imapSupervisorRunning.delete(account.id); }
   }
 
   async syncInbox(silent: boolean): Promise<void> {
-    if (this.syncRunning || !this.imap.isConnected()) {
-      if (!this.syncRunning) this.logger.debug("Inbox reconciliation deferred until IMAP reconnects");
-      return;
-    }
+    if (this.syncRunning) return;
     this.syncRunning = true;
     try {
-      const mailbox = this.imap.mailboxIdentity();
-      const knownUids = this.store.listKnownUids(mailbox.path, mailbox.uidValidity);
-      for (const incoming of await this.imap.scanInbox(knownUids)) {
+      for (const account of this.accounts) {
+        if (!account.imap.isConnected()) { this.logger.debug("Inbox reconciliation deferred for disconnected account", { accountId: account.id }); continue; }
+        await this.syncAccount(account);
+      }
+      await this.cleanupNonActionableCards();
+      await this.normalizePendingThreadCards(silent);
+      const analysisTargets = this.store.listPending().filter((mail) => !mail.analysis);
+      for (const mail of analysisTargets) this.store.enqueueJob("analyze", mail.id);
+      void this.processJobs();
+    } finally { this.syncRunning = false; }
+  }
+
+  private async syncAccount(account: MailAccountRuntime): Promise<void> {
+    try {
+      const mailbox = account.imap.mailboxIdentity();
+      const knownUids = this.store.listKnownUids(account.id, mailbox.path, mailbox.uidValidity);
+      for (const incoming of await account.imap.scanInbox(knownUids)) {
         const result = this.store.upsertMail(incoming);
-        const rule = this.rules?.match(incoming);
+        const rule = account.id === this.config.PRIMARY_ACCOUNT_ID ? this.rules?.match(incoming) : undefined;
         const ruleAppliedKey = rule ? `mail-rule:${result.id}:${rule.name}` : undefined;
         if (rule && (!rule.actions.copyTo || this.store.getKv(ruleAppliedKey!) !== "applied")) {
           const mail = this.store.getMail(result.id)!;
           try {
-            await this.imap.applyRule(mail, rule);
+            await account.imap.applyRule(mail, rule);
             if (ruleAppliedKey) this.store.setKv(ruleAppliedKey, "applied");
             this.logger.info("Mail rule applied", { mailId: mail.id, rule: rule.name, destination: rule.actions.moveTo ?? rule.actions.copyTo ?? "flags-only" });
             if (rule.actions.moveTo) {
@@ -134,20 +158,15 @@ export class MailBotApp {
           continue;
         }
       }
-      const liveUids = await this.imap.listInboxUids();
-      this.inboxCount = liveUids.size;
-      await this.reconcileRemovedMail(mailbox.path, mailbox.uidValidity, liveUids);
-      await this.cleanupNonActionableCards();
-      await this.normalizePendingThreadCards(silent);
-      const analysisTargets = this.store.listPending().filter((mail) => !mail.analysis);
-      for (const mail of analysisTargets) this.store.enqueueJob("analyze", mail.id);
-      void this.processJobs();
-      this.lastSuccessfulSync = new Date();
+      const liveUids = await account.imap.listInboxUids();
+      this.inboxCount.set(account.id, liveUids.size);
+      await this.reconcileRemovedMail(account.id, mailbox.path, mailbox.uidValidity, liveUids);
+      this.lastSuccessfulSync.set(account.id, new Date());
     } catch (error) {
       const fields = { error: describeError(error) };
-      if (this.imap.isConnected()) this.logger.error("Inbox reconciliation failed", fields);
-      else this.logger.warn("Inbox reconciliation interrupted by IMAP disconnect; reconnect will retry it", fields);
-    } finally { this.syncRunning = false; }
+      if (account.imap.isConnected()) this.logger.error("Inbox reconciliation failed", { accountId: account.id, ...fields });
+      else this.logger.warn("Inbox reconciliation interrupted by IMAP disconnect; reconnect will retry it", { accountId: account.id, ...fields });
+    }
   }
 
   private async processJobs(): Promise<void> {
@@ -179,8 +198,8 @@ export class MailBotApp {
     } finally { this.jobWorkerRunning = false; }
   }
 
-  private async reconcileRemovedMail(mailbox: string, uidValidity: string, liveUids: ReadonlySet<number>): Promise<void> {
-    for (const mail of this.store.listActionable(mailbox, uidValidity)) {
+  private async reconcileRemovedMail(accountId: string, mailbox: string, uidValidity: string, liveUids: ReadonlySet<number>): Promise<void> {
+    for (const mail of this.store.listActionable(accountId, mailbox, uidValidity)) {
       const key = `missing-inbox:${mail.id}`;
       if (liveUids.has(mail.uid)) { this.store.deleteKv(key); continue; }
       const misses = Number(this.store.getKv(key) ?? 0) + 1;
@@ -400,7 +419,7 @@ export class MailBotApp {
     const ids = [...mail.telegramMessageIds];
     for (const member of this.store.threadMembers(mail.id)) {
       for (const attachment of member.attachments.filter((a) => a.isRealAttachment)) {
-        const content = await this.imap.fetchAttachment(member, attachment);
+        const content = await this.imapFor(member).fetchAttachment(member, attachment);
         const sent = await this.telegram.sendDocument(attachment.filename, content, member.subject);
         ids.push(sent.message_id);
       }
@@ -421,7 +440,7 @@ export class MailBotApp {
     const hidden = members.flatMap((member) => member.attachments.filter((attachment) => !attachment.isRealAttachment && attachment.classification !== "calendar").map((attachment) => ({ member, attachment })));
     const ids = [...mail.telegramMessageIds];
     for (const { member, attachment } of hidden) {
-      const content = await this.imap.fetchAttachment(member, attachment);
+      const content = await this.imapFor(member).fetchAttachment(member, attachment);
       const sent = await this.telegram.sendDocument(attachment.filename, content, `${member.subject}\n${attachment.classificationReason ?? "تصویر مخفی‌شده"}`);
       ids.push(sent.message_id);
     }
@@ -478,7 +497,7 @@ export class MailBotApp {
     try {
       await this.editPrimary(mail, "⏳ در حال انتقال ایمیل به Archive و پاک‌سازی کارت…", []);
       const members = this.store.threadMembers(mail.id);
-      await this.imap.archiveMany(members);
+      await this.imapFor(mail).archiveMany(members);
       await this.telegram.deleteMessages(mail.telegramMessageIds);
       this.store.setTelegramMessages(mail.id, []);
       this.store.setThreadState(mail.id, "done");
@@ -502,8 +521,8 @@ export class MailBotApp {
       const kind = `calendar_${response}` as const;
       let outbound = this.store.getOutbound(mail.id);
       if (!outbound) {
-        const messageId = this.outboundMessageId(mail.id);
-        const built = await this.smtp.buildCalendarResponse(mail, response, messageId);
+        const messageId = this.outboundMessageId(mail);
+        const built = await this.smtpFor(mail).buildCalendarResponse(mail, response, messageId);
         outbound = this.store.createOutbound(mail.id, kind, messageId, built.raw);
       }
       if (outbound.kind !== kind) throw new Error("A different calendar response is already pending for this invitation");
@@ -513,21 +532,21 @@ export class MailBotApp {
       try {
         await this.editPrimary(mail, `⏳ در حال ثبت «${label}»، ذخیره در Sent و آرشیو دعوت…`, []);
         if (!smtpAccepted) {
-          if (await this.imap.sentContainsMessageId(outbound.messageId)) {
+          if (await this.imapFor(mail).sentContainsMessageId(outbound.messageId)) {
             smtpAccepted = true; sentSaved = true; this.store.markOutbound(mail.id, "sent");
           } else {
             if (outbound.smtpAttempted) throw new Error("Previous SMTP attempt has an unknown result; automatic resend was blocked to prevent a duplicate calendar response");
             this.store.markOutbound(mail.id, "attempt");
-            await this.smtp.sendRaw([mail.calendar.organizer!.address], outbound.raw);
+            await this.smtpFor(mail).sendRaw([mail.calendar.organizer!.address], outbound.raw);
             this.store.markOutbound(mail.id, "smtp"); smtpAccepted = true;
           }
         }
         if (!sentSaved) {
-          await this.imap.appendSent(outbound.raw);
+          await this.imapFor(mail).appendSent(outbound.raw);
           this.store.markOutbound(mail.id, "sent"); sentSaved = true;
         }
         const members = this.store.threadMembers(mail.id);
-        await this.imap.archiveMany(members);
+        await this.imapFor(mail).archiveMany(members);
         await this.telegram.deleteMessages(mail.telegramMessageIds);
         this.store.setTelegramMessages(mail.id, []);
         this.store.setThreadState(mail.id, "done");
@@ -564,7 +583,7 @@ export class MailBotApp {
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "draft", replyAll);
     await this.editPrimary(mail, "✨ در حال آماده‌سازی پاسخ پیشنهادی AI…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }]]);
     try {
-      const draft = await this.ai.draftReply(mail, "", "formal", replyAll, await this.imap.findThread(mail));
+      const draft = await this.ai.draftReply(mail, "", "formal", replyAll, await this.imapFor(mail).findThread(mail));
       this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", replyAll, "formal", draft);
       await this.showDraft(mail, draft, replyAll);
     } catch {
@@ -597,7 +616,7 @@ export class MailBotApp {
         `کارت‌های Pending: ${status.pendingThreads}`,
         `پیام‌های Pending: ${status.pending}`,
         `Failed: ${status.failed}`,
-        `آخرین Sync: ${esc(String(status.lastSuccessfulSync ?? "نامشخص"))}`,
+        ...Object.entries(status.accounts as Record<string, any>).map(([id, account]) => `${esc(account.label ?? id)}: ${account.imapConnected ? "✅" : "❌"} — Inbox ${account.inboxCount} — Sync ${esc(String(account.lastSuccessfulSync ?? "نامشخص"))}`),
         `آخرین Telegram Poll: ${esc(String(status.lastTelegramPoll ?? "نامشخص"))}`
       ].join("\n"), undefined, true);
       return;
@@ -619,7 +638,7 @@ export class MailBotApp {
       ]]);
       const useThread = conversation.metadata?.context === "thread";
       const useAttachments = conversation.metadata?.context === "attachments";
-      const thread = useThread ? await this.imap.findThread(mail) : [];
+      const thread = useThread ? await this.imapFor(mail).findThread(mail) : [];
       const attachmentContext = useAttachments ? await this.extractAttachmentContext(mail) : "";
       let answer: string;
       try { answer = await this.ai.ask(mail, message.text!, thread, attachmentContext); }
@@ -654,7 +673,7 @@ export class MailBotApp {
       ? message.text!
       : isForward
         ? await this.ai.draftForward(mail, message.text!, conversation.tone)
-        : await this.ai.draftReply(mail, message.text!, conversation.tone, conversation.replyAll, await this.imap.findThread(mail));
+        : await this.ai.draftReply(mail, message.text!, conversation.tone, conversation.replyAll, await this.imapFor(mail).findThread(mail));
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", conversation.replyAll, conversation.tone, draft, conversation.metadata);
     await this.cleanupConversationMessages(mail, message.message_id);
     if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(conversation.metadata));
@@ -673,7 +692,7 @@ export class MailBotApp {
         sections.push(`FILE: ${attachment.filename}\n[فایل از محدودیت تحلیل ${this.config.AI_ATTACHMENT_MAX_BYTES} بایت بزرگ‌تر است]`); continue;
       }
       try {
-        const content = await this.imap.fetchAttachment(mail, attachment);
+        const content = await this.imapFor(mail).fetchAttachment(mail, attachment);
         const extracted = await extractAttachmentText(attachment.filename, attachment.contentType, content);
         const text = extracted?.slice(0, remaining);
         sections.push(text ? `FILE: ${attachment.filename}\n${text}` : `FILE: ${attachment.filename}\n[نوع فایل برای استخراج متن پشتیبانی نمی‌شود]`);
@@ -699,7 +718,7 @@ export class MailBotApp {
     await this.editPrimary(mail, "✨ در حال بازنویسی پیش‌نویس با لحن انتخابی…", [[
       { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
     ]]);
-    const draft = isForward ? await this.ai.draftForward(mail, "", tone) : await this.ai.draftReply(mail, "", tone, current.replyAll, await this.imap.findThread(mail));
+    const draft = isForward ? await this.ai.draftForward(mail, "", tone) : await this.ai.draftReply(mail, "", tone, current.replyAll, await this.imapFor(mail).findThread(mail));
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", current.replyAll, tone, draft, current.metadata);
     if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(current.metadata));
     else await this.showDraft(mail, draft, current.replyAll);
@@ -731,7 +750,7 @@ export class MailBotApp {
 
   private async showDraft(mail: StoredMail, draft: string, replyAll: boolean): Promise<void> {
     const primary = mail.replyTo.length ? mail.replyTo : mail.from;
-    const excluded = new Set([this.config.SMTP_FROM.toLowerCase(), ...primary.map((a) => a.address.toLowerCase())]);
+    const excluded = new Set([...this.ownAddresses().map((address) => address.toLowerCase()), ...primary.map((a) => a.address.toLowerCase())]);
     const seen = new Set<string>();
     const copies = replyAll ? [...mail.to, ...mail.cc].filter((a) => {
       const key = a.address.toLowerCase();
@@ -755,11 +774,11 @@ export class MailBotApp {
     return this.withMailAction(mail, "reply", async () => {
     const conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
     if (!conversation?.draft) throw new Error("Reply draft is missing");
-    const draft = buildReply(mail, conversation.draft, conversation.replyAll, this.config.SMTP_FROM);
+    const draft = buildReply(mail, conversation.draft, conversation.replyAll, this.ownAddresses());
     let outbound = this.store.getOutbound(mail.id);
     if (!outbound) {
-      const messageId = this.outboundMessageId(mail.id);
-      outbound = this.store.createOutbound(mail.id, "reply", messageId, await this.smtp.buildReply(mail, draft, messageId));
+      const messageId = this.outboundMessageId(mail);
+      outbound = this.store.createOutbound(mail.id, "reply", messageId, await this.smtpFor(mail).buildReply(mail, draft, messageId));
     }
     if (outbound.kind !== "reply") throw new Error("Outbound operation kind mismatch");
     let replySent = outbound.smtpAccepted;
@@ -767,25 +786,25 @@ export class MailBotApp {
     try {
       await this.editPrimary(mail, "⏳ در حال ارسال پاسخ، ذخیره در Sent و آرشیو ایمیل…", []);
       if (!replySent) {
-        if (await this.imap.sentContainsMessageId(outbound.messageId)) {
+        if (await this.imapFor(mail).sentContainsMessageId(outbound.messageId)) {
           replySent = true; sentCopySaved = true; this.store.markOutbound(mail.id, "sent");
         } else {
           if (outbound.smtpAttempted) throw new Error("Previous SMTP attempt has an unknown result; automatic resend was blocked to prevent a duplicate reply");
           this.store.markOutbound(mail.id, "attempt");
-          await this.smtp.sendRaw([...draft.to, ...draft.cc].map((address) => address.address), outbound.raw);
+          await this.smtpFor(mail).sendRaw([...draft.to, ...draft.cc].map((address) => address.address), outbound.raw);
           this.store.markOutbound(mail.id, "smtp");
         }
         replySent = true;
         this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "sent_pending_sentcopy", conversation.replyAll, conversation.tone, conversation.draft);
       }
       if (!sentCopySaved) {
-        await this.imap.appendSent(outbound.raw);
+        await this.imapFor(mail).appendSent(outbound.raw);
         sentCopySaved = true;
         this.store.markOutbound(mail.id, "sent");
         this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "sent_pending_archive", conversation.replyAll, conversation.tone, conversation.draft);
       }
       const members = this.store.threadMembers(mail.id);
-      await this.imap.archiveMany(members);
+      await this.imapFor(mail).archiveMany(members);
       await this.telegram.deleteMessages(mail.telegramMessageIds);
       this.store.setTelegramMessages(mail.id, []);
       this.store.setThreadState(mail.id, "done");
@@ -806,9 +825,9 @@ export class MailBotApp {
     const recipients = this.forwardRecipients(conversation.metadata);
     let outbound = this.store.getOutbound(mail.id);
     if (!outbound) {
-      const source = await this.imap.fetchSource(mail);
-      const messageId = this.outboundMessageId(mail.id);
-      outbound = this.store.createOutbound(mail.id, "forward", messageId, await this.smtp.buildForward(mail, recipients, conversation.draft, source, messageId));
+      const source = await this.imapFor(mail).fetchSource(mail);
+      const messageId = this.outboundMessageId(mail);
+      outbound = this.store.createOutbound(mail.id, "forward", messageId, await this.smtpFor(mail).buildForward(mail, recipients, conversation.draft, source, messageId));
     }
     if (outbound.kind !== "forward") throw new Error("Outbound operation kind mismatch");
     let forwardSent = outbound.smtpAccepted;
@@ -816,25 +835,25 @@ export class MailBotApp {
     try {
       await this.editPrimary(mail, "⏳ در حال فوروارد، ذخیره در Sent و آرشیو ایمیل…", []);
       if (!forwardSent) {
-        if (await this.imap.sentContainsMessageId(outbound.messageId)) {
+        if (await this.imapFor(mail).sentContainsMessageId(outbound.messageId)) {
           forwardSent = true; sentCopySaved = true; this.store.markOutbound(mail.id, "sent");
         } else {
           if (outbound.smtpAttempted) throw new Error("Previous SMTP attempt has an unknown result; automatic resend was blocked to prevent a duplicate forward");
           this.store.markOutbound(mail.id, "attempt");
-          await this.smtp.sendRaw(recipients, outbound.raw);
+          await this.smtpFor(mail).sendRaw(recipients, outbound.raw);
           this.store.markOutbound(mail.id, "smtp");
         }
         forwardSent = true;
         this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_sent_pending_sentcopy", false, conversation.tone, conversation.draft, conversation.metadata);
       }
       if (!sentCopySaved) {
-        await this.imap.appendSent(outbound.raw);
+        await this.imapFor(mail).appendSent(outbound.raw);
         sentCopySaved = true;
         this.store.markOutbound(mail.id, "sent");
         this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_sent_pending_archive", false, conversation.tone, conversation.draft, conversation.metadata);
       }
       const members = this.store.threadMembers(mail.id);
-      await this.imap.archiveMany(members);
+      await this.imapFor(mail).archiveMany(members);
       await this.telegram.deleteMessages(mail.telegramMessageIds);
       this.store.setTelegramMessages(mail.id, []);
       this.store.setThreadState(mail.id, "done");
@@ -868,8 +887,20 @@ export class MailBotApp {
     finally { this.store.releaseActionLock(mail.id, token, cooldownMs); }
   }
 
-  private outboundMessageId(mailId: number): string {
-    const domain = this.config.SMTP_FROM.split("@")[1] ?? "localhost";
-    return `<mailbot-${mailId}-${randomUUID()}@${domain}>`;
+  private accountFor(mail: StoredMail): MailAccountRuntime {
+    const accountId = mail.accountId ?? this.config.PRIMARY_ACCOUNT_ID;
+    const account = this.accounts.find((candidate) => candidate.id === accountId);
+    if (!account) throw new Error(`Mail account is unavailable: ${accountId}`);
+    return account;
+  }
+
+  private imapFor(mail: StoredMail): ImapService { return this.accountFor(mail).imap; }
+  private smtpFor(mail: StoredMail): SmtpService { return this.accountFor(mail).smtp; }
+  private ownAddress(mail: StoredMail): string { return this.accountFor(mail).config.SMTP_FROM; }
+  private ownAddresses(): string[] { return this.accounts.map((account) => account.config.SMTP_FROM); }
+
+  private outboundMessageId(mail: StoredMail): string {
+    const domain = this.ownAddress(mail).split("@")[1] ?? "localhost";
+    return `<mailbot-${mail.id}-${randomUUID()}@${domain}>`;
   }
 }

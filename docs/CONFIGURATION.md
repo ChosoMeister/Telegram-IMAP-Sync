@@ -16,9 +16,14 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `MAIL_RULES_PATH` | unset | JSON rule file, normally `/app/config/mail-rules.json`. |
 | `HONORIFICS_PATH` | unset | Optional JSON map of lowercase email addresses to verified `خانم` or `آقای`; normally `/app/config/honorifics.json`. Unknown people are addressed neutrally. |
 | `USER_PROFILE_PATH` | unset | Optional ignored JSON profile, normally `/app/config/user-profile.json`, that identifies the mailbox owner to AI. Copy `config/user-profile.example.json`; include all of the owner's addresses and common name spellings, but never credentials. |
+| `PRIMARY_ACCOUNT_ID` | `primary` | Immutable lowercase identifier for the existing environment-defined account. Set this before the first multi-account migration, for example `orchid`. |
+| `PRIMARY_ACCOUNT_LABEL` | `Primary` | Short label displayed on Telegram cards for the primary account. |
+| `MAIL_ACCOUNT_FILES` | unset | Comma-separated ignored account env files, for example `/app/config/account-secondary.env`. Each file adds an independent IMAP/SMTP identity to the same All Inbox. |
 | `HEALTH_PORT` | `8080` | Container health/status HTTP port. Compose exposes it as loopback port 18080. |
 
 ## IMAP and SMTP
+
+The variables below define the primary account. Additional accounts use the same IMAP/SMTP keys inside a file copied from `config/mail-account.example.env`, plus unique `ACCOUNT_ID` and `ACCOUNT_LABEL`. Account files are parsed directly rather than sourced by a shell, so special characters in passwords remain literal. Keep them mode `600` and readable by container UID `10001`.
 
 | Variable | Required/default | Purpose |
 |---|---|---|
@@ -75,4 +80,4 @@ Calendar detection, event fields, RSVP validity, and urgency scores do not depen
 
 ## Production minimum
 
-Set real values for IMAP, SMTP, Telegram, archive, and sent-mail settings; set `TEST_IMPORT_LIMIT=0`. Run `npm run discover` and `npm run preflight` in the built container before switching `APP_MODE=live`. Keep `.env`, `config/mail-rules.json`, `config/honorifics.json`, `config/user-profile.json`, and backup files outside Git.
+Set real values for IMAP, SMTP, Telegram, archive, and sent-mail settings; set `TEST_IMPORT_LIMIT=0`. Run `npm run discover` and `npm run preflight` in the built container before switching `APP_MODE=live`. Keep `.env`, `config/account-*.env`, `config/mail-rules.json`, `config/honorifics.json`, `config/user-profile.json`, and backup files outside Git.

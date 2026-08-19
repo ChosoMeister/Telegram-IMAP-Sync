@@ -117,7 +117,7 @@ function imageDimensions(content: Buffer, contentType: string): { width?: number
   return {};
 }
 
-export function parsedMailToIncoming(parsed: ParsedMail, identity: Pick<IncomingMail, "uid" | "uidValidity" | "mailbox">): IncomingMail {
+export function parsedMailToIncoming(parsed: ParsedMail, identity: Pick<IncomingMail, "uid" | "uidValidity" | "mailbox"> & Pick<IncomingMail, "accountId" | "accountLabel">): IncomingMail {
   const html = typeof parsed.html === "string" ? parsed.html : undefined;
   const rawText = parsed.text?.trim() || (html ? htmlToReadableText(html) : "");
   const references = Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [];

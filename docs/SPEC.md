@@ -24,6 +24,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 16. Free-form input is accepted only as a direct reply to the exact ForceReply prompt that opened its mail-scoped workflow.
 17. Calendar identity comes from MIME `text/calendar`, never from an attachment filename or AI inference; its structured fields take precedence over generic analysis in the card.
 18. When an owner profile is configured, AI treats its names and addresses as the bot user's identity, labels the action owner, and addresses self-assigned actions directly as `شما` rather than naming the user in third person.
+19. Every mail belongs to one immutable account; all reads, replies, forwards, calendar responses, Sent copies, and Archive moves use that account. IMAP identities and threads never collide across accounts.
 
 ## Telegram lifecycle
 

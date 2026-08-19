@@ -13,6 +13,9 @@ const schema = z.object({
   MAIL_RULES_PATH: z.string().optional(),
   HONORIFICS_PATH: z.string().optional(),
   USER_PROFILE_PATH: z.string().optional(),
+  PRIMARY_ACCOUNT_ID: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/).default("primary"),
+  PRIMARY_ACCOUNT_LABEL: z.string().min(1).default("Primary"),
+  MAIL_ACCOUNT_FILES: z.string().optional(),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
 
   IMAP_HOST: z.string().min(1),

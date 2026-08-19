@@ -26,6 +26,10 @@ describe("mail card buttons", () => {
     expect(renderMail(mail)).toContain("<b>اقدام شما:</b>");
   });
 
+  it("shows the source account on a combined Inbox card", () => {
+    expect(renderMail({ ...stored(1), accountId: "secondary", accountLabel: "Axon" })).toContain("<b>حساب:</b> Axon");
+  });
+
   it("uses Persian conditional Reply All and counts secondary content", () => {
     const mail = { ...stored(1), attachments: [
       { id: "a", filename: "file.pdf", contentType: "application/pdf", size: 1, disposition: "attachment", isRealAttachment: true },

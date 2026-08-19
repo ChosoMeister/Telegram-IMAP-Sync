@@ -4,6 +4,7 @@ import { deriveThreadKey } from "./mail/thread.js";
 
 interface MailRow {
   id: number;
+  account_id: string;
   uid: number;
   uid_validity: string;
   mailbox: string;
@@ -38,7 +39,7 @@ export interface DurableJob {
 
 export class Store {
   private readonly db: DatabaseSync;
-  constructor(path: string) {
+  constructor(path: string, private readonly primaryAccountId = "primary", private readonly primaryAccountLabel = "Primary") {
     this.db = new DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.db.exec(`
@@ -145,6 +146,17 @@ export class Store {
       CREATE INDEX mails_thread_state_idx ON mails(thread_key,state);
     `);
     this.applyMigration(3, `ALTER TABLE conversations ADD COLUMN prompt_message_id INTEGER;`);
+    const accountMigration = this.db.prepare("SELECT 1 FROM schema_migrations WHERE version=4").get();
+    if (!accountMigration) {
+      this.db.exec("BEGIN IMMEDIATE");
+      try {
+        this.db.exec("ALTER TABLE mails ADD COLUMN account_id TEXT NOT NULL DEFAULT 'primary'");
+        this.db.prepare("UPDATE mails SET account_id=?,mailbox=?||'::'||mailbox,thread_key=?||':'||thread_key")
+          .run(this.primaryAccountId, this.primaryAccountId, this.primaryAccountId);
+        this.db.prepare("INSERT INTO schema_migrations(version) VALUES(4)").run();
+        this.db.exec("COMMIT");
+      } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    }
     for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
       const mail = JSON.parse(row.payload_json) as IncomingMail;
       this.db.prepare("UPDATE mails SET thread_key=? WHERE id=?").run(deriveThreadKey(mail), row.id);
@@ -242,18 +254,20 @@ export class Store {
   }
 
   upsertMail(mail: IncomingMail): { id: number; created: boolean } {
-    const threadKey = deriveThreadKey(mail);
-    const existing = this.db.prepare("SELECT id FROM mails WHERE mailbox=? AND uid_validity=? AND uid=?")
-      .get(mail.mailbox, mail.uidValidity, mail.uid) as { id: number } | undefined;
+    const accountId = mail.accountId ?? this.primaryAccountId;
+    const storageMailbox = `${accountId}::${mail.mailbox}`;
+    const threadKey = `${accountId}:${deriveThreadKey(mail)}`;
+    const existing = this.db.prepare("SELECT id FROM mails WHERE account_id=? AND mailbox=? AND uid_validity=? AND uid=?")
+      .get(accountId, storageMailbox, mail.uidValidity, mail.uid) as { id: number } | undefined;
     if (existing) {
       this.db.prepare("UPDATE mails SET message_id=?,thread_key=?,payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
         .run(mail.messageId ?? null, threadKey, JSON.stringify(mail), existing.id);
       return { id: existing.id, created: false };
     }
     const result = this.db.prepare(`
-      INSERT INTO mails(uid,uid_validity,mailbox,message_id,thread_key,payload_json)
-      VALUES(?,?,?,?,?,?)
-    `).run(mail.uid, mail.uidValidity, mail.mailbox, mail.messageId ?? null, threadKey, JSON.stringify(mail));
+      INSERT INTO mails(uid,uid_validity,mailbox,message_id,thread_key,payload_json,account_id)
+      VALUES(?,?,?,?,?,?,?)
+    `).run(mail.uid, mail.uidValidity, storageMailbox, mail.messageId ?? null, threadKey, JSON.stringify(mail), accountId);
     return { id: Number(result.lastInsertRowid), created: true };
   }
 
@@ -296,9 +310,9 @@ export class Store {
     return row?.thread_key ?? `mail:${mailId}`;
   }
 
-  listKnownUids(mailbox: string, uidValidity: string): Set<number> {
-    const rows = this.db.prepare("SELECT uid,payload_json FROM mails WHERE mailbox=? AND uid_validity=?")
-      .all(mailbox, uidValidity) as unknown as Array<{ uid: number; payload_json: string }>;
+  listKnownUids(accountId: string, mailbox: string, uidValidity: string): Set<number> {
+    const rows = this.db.prepare("SELECT uid,payload_json FROM mails WHERE account_id=? AND mailbox=? AND uid_validity=?")
+      .all(accountId, `${accountId}::${mailbox}`, uidValidity) as unknown as Array<{ uid: number; payload_json: string }>;
     return new Set(rows.filter((row) => {
       const payload = JSON.parse(row.payload_json) as IncomingMail;
       const needsCalendarRefresh = payload.attachments.some((attachment) => attachment.contentType.toLowerCase() === "text/calendar") && payload.calendar?.parserVersion !== 1;
@@ -306,9 +320,9 @@ export class Store {
     }).map((row) => row.uid));
   }
 
-  listActionable(mailbox: string, uidValidity: string): StoredMail[] {
-    return (this.db.prepare("SELECT * FROM mails WHERE mailbox=? AND uid_validity=? AND state IN ('pending','failed','processing') ORDER BY uid")
-      .all(mailbox, uidValidity) as unknown as MailRow[]).map((row) => this.rowToMail(row));
+  listActionable(accountId: string, mailbox: string, uidValidity: string): StoredMail[] {
+    return (this.db.prepare("SELECT * FROM mails WHERE account_id=? AND mailbox=? AND uid_validity=? AND state IN ('pending','failed','processing') ORDER BY uid")
+      .all(accountId, `${accountId}::${mailbox}`, uidValidity) as unknown as MailRow[]).map((row) => this.rowToMail(row));
   }
 
   listNonActionableWithTelegram(): StoredMail[] {
@@ -389,6 +403,8 @@ export class Store {
     const payload = JSON.parse(row.payload_json) as IncomingMail & { receivedAt: string };
     return {
       ...payload,
+      accountId: payload.accountId ?? row.account_id,
+      accountLabel: payload.accountLabel ?? (row.account_id === this.primaryAccountId ? this.primaryAccountLabel : row.account_id),
       receivedAt: new Date(payload.receivedAt),
       id: row.id,
       state: row.state,

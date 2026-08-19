@@ -39,6 +39,8 @@ export interface CalendarEvent {
 }
 
 export interface IncomingMail {
+  accountId?: string;
+  accountLabel?: string;
   uid: number;
   uidValidity: string;
   mailbox: string;

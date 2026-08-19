@@ -11,7 +11,7 @@ import { normalizeMessageId } from "./thread.js";
 export class ImapService {
   private client?: ImapFlow;
   private stopped = false;
-  constructor(private config: AppConfig, private logger: Logger) {}
+  constructor(private config: AppConfig, private logger: Logger, private accountId = "primary", private accountLabel = "Primary") {}
 
   private createClient(): ImapFlow {
     return new ImapFlow({
@@ -109,7 +109,9 @@ export class ImapService {
         mails.push(parsedMailToIncoming(parsed, {
           uid: message.uid,
           uidValidity: String(mailbox.uidValidity),
-          mailbox: this.config.IMAP_MAILBOX
+          mailbox: this.config.IMAP_MAILBOX,
+          accountId: this.accountId,
+          accountLabel: this.accountLabel
         }));
       }
       return mails;

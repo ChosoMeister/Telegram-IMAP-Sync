@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 - 2026-08-19
+
+- Add a single-process Multi-IMAP/SMTP All Inbox with one Telegram update dispatcher.
+- Scope IMAP identity, exact RFC threads, health, reconciliation, and all mailbox/outbound actions to an immutable account ID.
+- Route Reply, Reply All, Forward, calendar RSVP, attachment/thread reads, Sent APPEND, and Archive through the account that received the mail.
+- Add atomic migration of existing data to the configured primary account while preserving cards and pending state.
+- Add ignored secondary-account env files with literal special-character parsing, account labels on cards, per-account `/status`, regression tests, and operational documentation.
+- Keep organization-specific mail rules limited to the primary account until explicit per-account rules are configured.
+
 ## 0.7.0 - 2026-08-19
 
 - Add an optional ignored owner profile containing names, aliases, owned addresses, organization, and job-title context without credentials.

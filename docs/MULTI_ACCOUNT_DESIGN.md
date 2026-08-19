@@ -48,4 +48,8 @@ A future ignored `config/accounts.json` will hold an array of account IDs, displ
 - Exact Inbox, Archive, and Sent folder paths after live discovery
 - Optional organization/job title for AI identity and optional account-specific mail rules
 
-This document is a design contract, not a claim that multi-account runtime support is already released.
+## Implemented behavior
+
+Version 0.8.0 implements the account runtime map, account-scoped storage identity and threads, combined chronological cards, per-account health, and source-account routing for Reply, Reply All, Forward, calendar RSVP, attachment/thread retrieval, Sent APPEND, and Archive. The primary account retains its existing environment variables; additional ignored account files are listed in `MAIL_ACCOUNT_FILES`. Existing rows migrate atomically to `PRIMARY_ACCOUNT_ID` while preserving Telegram IDs and pending state.
+
+Mail rules currently run only for the primary account. This is deliberate: organization-specific folders and routing must not be copied to another server without explicit per-account rules.

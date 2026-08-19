@@ -13,11 +13,20 @@ describe("Store", () => {
     expect(first.created).toBe(true);
     expect(second).toEqual({ id: first.id, created: false });
   });
+  it("keeps identical IMAP identities isolated between accounts", () => {
+    const first = store.upsertMail({ ...incoming, accountId: "primary", accountLabel: "Primary" });
+    const second = store.upsertMail({ ...incoming, accountId: "secondary", accountLabel: "Secondary" });
+    expect(second.id).not.toBe(first.id);
+    expect(store.getMail(first.id)?.accountId).toBe("primary");
+    expect(store.getMail(second.id)?.accountId).toBe("secondary");
+    expect(store.threadMembers(first.id)).toHaveLength(1);
+    expect(store.threadMembers(second.id)).toHaveLength(1);
+  });
   it("returns known UIDs only for the current mailbox identity", () => {
     store.upsertMail(incoming);
     store.upsertMail({ ...incoming, uid: 8 });
     store.upsertMail({ ...incoming, uid: 9, uidValidity: "different" });
-    expect([...store.listKnownUids(incoming.mailbox, incoming.uidValidity)].sort()).toEqual([7, 8]);
+    expect([...store.listKnownUids("primary", incoming.mailbox, incoming.uidValidity)].sort()).toEqual([7, 8]);
   });
   it("persists analysis, Telegram IDs and conversation state", () => {
     const { id } = store.upsertMail(incoming);

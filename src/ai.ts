@@ -206,9 +206,10 @@ export class AiService {
   }
 }
 
-export function buildReply(mail: StoredMail, text: string, replyAll: boolean, ownAddress: string): ReplyDraft {
+export function buildReply(mail: StoredMail, text: string, replyAll: boolean, ownAddress: string | string[]): ReplyDraft {
   const sender = mail.replyTo.length ? mail.replyTo : mail.from;
-  const excluded = new Set([ownAddress.toLowerCase(), ...sender.map((a) => a.address.toLowerCase())]);
+  const ownAddresses = Array.isArray(ownAddress) ? ownAddress : [ownAddress];
+  const excluded = new Set([...ownAddresses.map((address) => address.toLowerCase()), ...sender.map((a) => a.address.toLowerCase())]);
   const seen = new Set<string>();
   const cc = replyAll ? [...mail.to, ...mail.cc].filter((a) => {
     const key = a.address.toLowerCase();
