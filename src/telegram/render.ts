@@ -65,7 +65,7 @@ function renderCalendarMail(mail: StoredMail, thread: StoredMail[]): string {
   const type = event.method === "CANCEL" || event.status === "CANCELLED" ? "لغو رویداد" : event.method === "REPLY" ? "پاسخ به دعوت" : "دعوت تقویم";
   const action = event.method === "CANCEL" || event.status === "CANCELLED" ? "بررسی لغو یا تغییر برنامه" : "بررسی زمان رویداد و پاسخ به دعوت";
   const attendeeLimit = 20;
-  const attendeeLines = event.attendees.slice(0, attendeeLimit).map((attendee) => `• ${attendee.name || "نام ثبت نشده"}`);
+  const attendeeLines = event.attendees.slice(0, attendeeLimit).map((attendee) => `• ${attendee.name || attendee.address}`);
   if (event.attendees.length > attendeeLimit) attendeeLines.push(`• و ${event.attendees.length - attendeeLimit} نفر دیگر`);
   return [
     `📅 <b>${type}</b>`,
