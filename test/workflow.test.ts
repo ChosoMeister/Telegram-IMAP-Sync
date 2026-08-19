@@ -15,7 +15,7 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
     sendDocument: vi.fn(), getUpdates: vi.fn()
   };
   const imap = {
-    archive, fetchAttachment: vi.fn(), scanInbox: vi.fn().mockResolvedValue([]), connect: vi.fn(), waitForChanges: vi.fn(), stop: vi.fn(),
+    archive, archiveMany: vi.fn(async (mails: any[]) => archive(mails[0])), fetchAttachment: vi.fn(), scanInbox: vi.fn().mockResolvedValue([]), connect: vi.fn(), waitForChanges: vi.fn(), stop: vi.fn(),
     findThread: vi.fn().mockResolvedValue([incoming]),
     sentContainsMessageId: vi.fn().mockResolvedValue(false), appendSent: vi.fn().mockResolvedValue(undefined),
     mailboxIdentity: vi.fn().mockReturnValue({ path: incoming.mailbox, uidValidity: incoming.uidValidity }), isConnected: vi.fn().mockReturnValue(true),
@@ -126,7 +126,7 @@ describe("pending queue rotation", () => {
   it("republishes the complete queue oldest first when any item expires", async () => {
     const s = setup();
     s.store.setTelegramMessages(s.id, [100], new Date("2026-08-16T00:00:00Z"));
-    const newer = s.store.upsertMail({ ...incoming, uid: 8, subject: "Newer", receivedAt: new Date("2026-08-18T11:00:00Z") });
+    const newer = s.store.upsertMail({ ...incoming, uid: 8, messageId: "<newer@example.com>", subject: "Newer", receivedAt: new Date("2026-08-18T11:00:00Z") });
     s.store.setTelegramMessages(newer.id, [102], new Date());
     await (s.app as any).rotatePending();
     expect(s.telegram.deleteMessages.mock.calls.map((call: any[]) => call[0])).toEqual([[100], [102]]);
@@ -184,8 +184,8 @@ describe("incremental reconciliation recovery", () => {
 describe("single-card navigation", () => {
   it("suppresses a queued duplicate attachment action without adding chat messages", async () => {
     const s = setup();
+    s.store.upsertMail({ ...incoming, attachments: [{ id: "a", filename: "invoice.pdf", contentType: "application/pdf", size: 3, disposition: "attachment", isRealAttachment: true }] });
     const mail = s.store.getMail(s.id)!;
-    mail.attachments = [{ id: "a", filename: "invoice.pdf", contentType: "application/pdf", size: 3, disposition: "attachment", isRealAttachment: true }];
     s.imap.fetchAttachment.mockResolvedValue(Buffer.from("pdf"));
     s.telegram.sendDocument.mockResolvedValue({ message_id: 201, chat: { id: 42 } });
     await (s.app as any).showFiles(mail);
@@ -225,10 +225,21 @@ describe("single-card navigation", () => {
   it("asks AI about the selected mail and renders the answer on the same card", async () => {
     const s = setup();
     await (s.app as any).handleCallback("cb1", `m:${s.id}:askmail`);
-    await (s.app as any).handleText({ message_id: 300, chat: { id: 42 }, text: "چه کاری لازم است؟", from: { id: 42 } });
+    await (s.app as any).handleText({ message_id: 300, chat: { id: 42 }, reply_to_message: { message_id: 200 }, text: "چه کاری لازم است؟", from: { id: 42 } });
     expect((s.app as any).ai.ask).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "چه کاری لازم است؟", [], "");
     expect(s.telegram.editMessage).toHaveBeenLastCalledWith(100, expect.stringContaining("پاسخ آزمایشی"), expect.any(Array));
     expect(s.store.getConversation(42, s.id)).toBeUndefined();
+    s.store.close();
+  });
+
+  it("binds text to the exact ForceReply prompt when two mail forms are open", async () => {
+    const s = setup();
+    const other = s.store.upsertMail({ ...incoming, uid: 8, messageId: "<other@example.com>", subject: "Other" });
+    s.store.setConversation(42, s.id, "ai_question", false, "formal", undefined, { context: "mail" }, 501);
+    s.store.setConversation(42, other.id, "ai_question", false, "formal", undefined, { context: "mail" }, 502);
+    await (s.app as any).handleText({ message_id: 600, chat: { id: 42 }, reply_to_message: { message_id: 501 }, text: "ایمیل اول چیست؟", from: { id: 42 } });
+    expect((s.app as any).ai.ask).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "ایمیل اول چیست؟", [], "");
+    expect(s.store.getConversation(42, other.id)).toBeDefined();
     s.store.close();
   });
 });

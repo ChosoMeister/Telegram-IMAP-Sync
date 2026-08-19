@@ -3,6 +3,7 @@ import type { Analysis, ReplyDraft, StoredMail } from "./domain/types.js";
 import type { AppConfig } from "./config.js";
 import type { Logger } from "./logger.js";
 import { describeError } from "./errors.js";
+import type { Honorific, HonorificDirectory } from "./honorifics.js";
 
 const analysisSchema = z.object({
   importance: z.enum(["critical", "high", "normal", "low"]),
@@ -18,6 +19,7 @@ const persianStylePolicy = [
   "Prefer clear Persian wording over Arabic-heavy bureaucratic clichés.",
   "Never use «با سلام و احترام», «سلام و احترام», «با سلام», or «با تشکر».",
   "For an email greeting use exactly «با درود و مهر» and for a closing thanks use exactly «با سپاس».",
+  "Never infer or guess a person's gender from their name, email address, role, or writing.",
   "Do not add a signature."
 ].join(" ");
 
@@ -32,6 +34,17 @@ export function normalizePersianStyle(value: string): string {
     .replace(/ي/gu, "ی")
     .replace(/ك/gu, "ک")
     .trim();
+}
+
+export function normalizeReplyHonorific(value: string, verified?: Honorific): string {
+  let meaningful = 0;
+  return normalizePersianStyle(value).split("\n").map((line) => {
+    if (!line.trim() || meaningful++ >= 4) return line;
+    const prefix = /^\s*(?:سرکار\s+خانم|جناب\s+آقای|خانم|آقای|آقا)\s+/u;
+    if (verified === "خانم") return line.replace(prefix, "سرکار خانم ");
+    if (verified === "آقای") return line.replace(prefix, "جناب آقای ");
+    return line.replace(prefix, "");
+  }).join("\n").trim();
 }
 
 interface Provider {
@@ -84,7 +97,7 @@ class OpenAiProvider implements Provider {
 export class AiService {
   private providers: Provider[];
   private readonly health = new Map<string, { ok: boolean; lastSuccess?: string; lastError?: string }>();
-  constructor(private config: AppConfig, private logger: Logger) {
+  constructor(private config: AppConfig, private logger: Logger, private honorifics: HonorificDirectory = {}) {
     const available: Record<string, Provider> = { ollama: new OllamaProvider(config), proxy: new OpenAiProvider(config) };
     this.providers = config.aiProviderOrder.map((name) => available[name]).filter((p): p is Provider => Boolean(p));
     for (const provider of this.providers) this.health.set(provider.name, { ok: true });
@@ -119,14 +132,19 @@ export class AiService {
   }
 
   async draftReply(mail: StoredMail, instruction: string, tone: string, replyAll: boolean, thread: Array<Pick<StoredMail, "subject" | "from" | "to" | "cc" | "receivedAt" | "text">> = []): Promise<string> {
-    const system = `Draft a Persian business email reply. Use the mail facts and the user's instruction. Respect the requested tone. Do not invent commitments. Return JSON only: {"text":"..."}. ${persianStylePolicy}`;
+    const recipient = (mail.replyTo[0] ?? mail.from[0])?.address.toLowerCase();
+    const verified = recipient ? this.honorifics[recipient] : undefined;
+    const addressing = verified
+      ? `The recipient's verified honorific is «${verified}». Use it exactly; do not substitute another gendered title.`
+      : "No verified honorific is available. Use a neutral greeting without خانم, آقای, آقا, سرکار خانم, or جناب آقای.";
+    const system = `Draft a Persian business email reply. Use the mail facts and the user's instruction. Respect the requested tone. Do not invent commitments. ${addressing} Return JSON only: {"text":"..."}. ${persianStylePolicy}`;
     const threadContext = thread.length ? `\nThread context: ${JSON.stringify(thread.map((item) => JSON.parse(this.context(item)))).slice(0, this.config.AI_CONTEXT_MAX_CHARS)}` : "";
     const user = `${this.context(mail)}${threadContext}\nReply all: ${replyAll}\nTone: ${tone}\nUser instruction: ${instruction || "Write the best concise response."}`;
     for (const provider of this.providers) {
       try {
         const result = parseJson(await provider.complete(system, user));
         this.success(provider);
-        if (typeof result.text === "string" && result.text.trim()) return normalizePersianStyle(result.text);
+        if (typeof result.text === "string" && result.text.trim()) return normalizeReplyHonorific(result.text, verified);
       } catch (error) {
         this.failure(provider, error);
         this.logger.warn("AI reply provider failed", { provider: provider.name, error: describeError(error) });

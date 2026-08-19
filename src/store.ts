@@ -1,5 +1,6 @@
 import { backup, DatabaseSync } from "node:sqlite";
 import type { Analysis, IncomingMail, StoredMail } from "./domain/types.js";
+import { deriveThreadKey } from "./mail/thread.js";
 
 interface MailRow {
   id: number;
@@ -7,6 +8,7 @@ interface MailRow {
   uid_validity: string;
   mailbox: string;
   message_id: string | null;
+  thread_key: string | null;
   state: StoredMail["state"];
   payload_json: string;
   analysis_json: string | null;
@@ -138,6 +140,15 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS jobs_ready_idx ON jobs(state, available_at);
     `);
+    this.applyMigration(2, `
+      ALTER TABLE mails ADD COLUMN thread_key TEXT;
+      CREATE INDEX mails_thread_state_idx ON mails(thread_key,state);
+    `);
+    this.applyMigration(3, `ALTER TABLE conversations ADD COLUMN prompt_message_id INTEGER;`);
+    for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
+      const mail = JSON.parse(row.payload_json) as IncomingMail;
+      this.db.prepare("UPDATE mails SET thread_key=? WHERE id=?").run(deriveThreadKey(mail), row.id);
+    }
     this.db.prepare("UPDATE mails SET state='failed',last_error='Recovered interrupted operation after restart',updated_at=CURRENT_TIMESTAMP WHERE state='processing'").run();
   }
 
@@ -231,17 +242,18 @@ export class Store {
   }
 
   upsertMail(mail: IncomingMail): { id: number; created: boolean } {
+    const threadKey = deriveThreadKey(mail);
     const existing = this.db.prepare("SELECT id FROM mails WHERE mailbox=? AND uid_validity=? AND uid=?")
       .get(mail.mailbox, mail.uidValidity, mail.uid) as { id: number } | undefined;
     if (existing) {
-      this.db.prepare("UPDATE mails SET message_id=?,payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
-        .run(mail.messageId ?? null, JSON.stringify(mail), existing.id);
+      this.db.prepare("UPDATE mails SET message_id=?,thread_key=?,payload_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(mail.messageId ?? null, threadKey, JSON.stringify(mail), existing.id);
       return { id: existing.id, created: false };
     }
     const result = this.db.prepare(`
-      INSERT INTO mails(uid,uid_validity,mailbox,message_id,payload_json)
-      VALUES(?,?,?,?,?)
-    `).run(mail.uid, mail.uidValidity, mail.mailbox, mail.messageId ?? null, JSON.stringify(mail));
+      INSERT INTO mails(uid,uid_validity,mailbox,message_id,thread_key,payload_json)
+      VALUES(?,?,?,?,?,?)
+    `).run(mail.uid, mail.uidValidity, mail.mailbox, mail.messageId ?? null, threadKey, JSON.stringify(mail));
     return { id: Number(result.lastInsertRowid), created: true };
   }
 
@@ -253,6 +265,35 @@ export class Store {
   listPending(): StoredMail[] {
     return (this.db.prepare("SELECT * FROM mails WHERE state IN ('pending','failed') ORDER BY json_extract(payload_json,'$.receivedAt'), id")
       .all() as unknown as MailRow[]).map((r) => this.rowToMail(r));
+  }
+
+  listPendingCards(): StoredMail[] {
+    const representatives = new Map<string, StoredMail>();
+    for (const mail of this.listPending()) {
+      const key = this.threadKey(mail.id);
+      const current = representatives.get(key);
+      if (!current || mail.receivedAt > current.receivedAt || (mail.receivedAt.getTime() === current.receivedAt.getTime() && mail.id > current.id)) {
+        representatives.set(key, mail);
+      }
+    }
+    return [...representatives.values()].sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime() || a.id - b.id);
+  }
+
+  threadMembers(mailId: number, actionableOnly = true): StoredMail[] {
+    const key = this.threadKey(mailId);
+    const rows = this.db.prepare(`SELECT * FROM mails WHERE thread_key=? ${actionableOnly ? "AND state IN ('pending','failed','processing')" : ""} ORDER BY json_extract(payload_json,'$.receivedAt'),id`)
+      .all(key) as unknown as MailRow[];
+    return rows.map((row) => this.rowToMail(row));
+  }
+
+  threadRepresentative(mailId: number): StoredMail | undefined {
+    const members = this.threadMembers(mailId);
+    return members[members.length - 1];
+  }
+
+  private threadKey(mailId: number): string {
+    const row = this.db.prepare("SELECT thread_key FROM mails WHERE id=?").get(mailId) as { thread_key: string | null } | undefined;
+    return row?.thread_key ?? `mail:${mailId}`;
   }
 
   listKnownUids(mailbox: string, uidValidity: string): Set<number> {
@@ -274,10 +315,10 @@ export class Store {
       .all() as unknown as MailRow[]).map((row) => this.rowToMail(row));
   }
 
-  counts(): { pending: number; failed: number; processing: number; done: number; externalDone: number } {
+  counts(): { pending: number; pendingThreads: number; failed: number; processing: number; done: number; externalDone: number } {
     const rows = this.db.prepare("SELECT state,count(*) count FROM mails GROUP BY state").all() as unknown as Array<{ state: string; count: number }>;
     const count = (state: string) => rows.find((row) => row.state === state)?.count ?? 0;
-    return { pending: count("pending"), failed: count("failed"), processing: count("processing"), done: count("done"), externalDone: count("external_done") };
+    return { pending: count("pending"), pendingThreads: this.listPendingCards().length, failed: count("failed"), processing: count("processing"), done: count("done"), externalDone: count("external_done") };
   }
 
   setAnalysis(id: number, analysis: Analysis): void {
@@ -295,14 +336,24 @@ export class Store {
       .run(state, error ?? null, id);
   }
 
-  setConversation(userId: number, mailId: number, mode: string, replyAll: boolean, tone = "formal", draft?: string, metadata?: Record<string, unknown>): void {
-    this.db.prepare(`INSERT INTO conversations(telegram_user_id,mail_id,mode,reply_all,tone,draft_text,metadata_json)
-      VALUES(?,?,?,?,?,?,?) ON CONFLICT(telegram_user_id,mail_id) DO UPDATE SET mode=excluded.mode,
-      reply_all=excluded.reply_all,tone=excluded.tone,draft_text=excluded.draft_text,metadata_json=excluded.metadata_json,updated_at=CURRENT_TIMESTAMP`)
-      .run(userId, mailId, mode, replyAll ? 1 : 0, tone, draft ?? null, metadata ? JSON.stringify(metadata) : null);
+  setThreadState(mailId: number, state: StoredMail["state"], error?: string): void {
+    for (const member of this.threadMembers(mailId)) this.setState(member.id, state, error);
   }
 
-  getConversation(userId: number, mailId?: number): { mailId: number; mode: string; replyAll: boolean; tone: string; draft?: string; metadata?: Record<string, unknown> } | undefined {
+  setConversation(userId: number, mailId: number, mode: string, replyAll: boolean, tone = "formal", draft?: string, metadata?: Record<string, unknown>, promptMessageId?: number): void {
+    this.db.prepare(`INSERT INTO conversations(telegram_user_id,mail_id,mode,reply_all,tone,draft_text,metadata_json,prompt_message_id)
+      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(telegram_user_id,mail_id) DO UPDATE SET mode=excluded.mode,
+      reply_all=excluded.reply_all,tone=excluded.tone,draft_text=excluded.draft_text,metadata_json=excluded.metadata_json,
+      prompt_message_id=excluded.prompt_message_id,updated_at=CURRENT_TIMESTAMP`)
+      .run(userId, mailId, mode, replyAll ? 1 : 0, tone, draft ?? null, metadata ? JSON.stringify(metadata) : null, promptMessageId ?? null);
+  }
+
+  setConversationPrompt(userId: number, mailId: number, promptMessageId: number): void {
+    this.db.prepare("UPDATE conversations SET prompt_message_id=?,updated_at=CURRENT_TIMESTAMP WHERE telegram_user_id=? AND mail_id=?")
+      .run(promptMessageId, userId, mailId);
+  }
+
+  getConversation(userId: number, mailId?: number): { mailId: number; mode: string; replyAll: boolean; tone: string; draft?: string; metadata?: Record<string, unknown>; promptMessageId?: number } | undefined {
     const row = (mailId === undefined
       ? this.db.prepare("SELECT * FROM conversations WHERE telegram_user_id=? ORDER BY updated_at DESC,rowid DESC LIMIT 1").get(userId)
       : this.db.prepare("SELECT * FROM conversations WHERE telegram_user_id=? AND mail_id=?").get(userId, mailId)) as any;
@@ -310,8 +361,15 @@ export class Store {
     return {
       mailId: row.mail_id, mode: row.mode, replyAll: Boolean(row.reply_all), tone: row.tone,
       ...(row.draft_text ? { draft: row.draft_text } : {}),
-      ...(row.metadata_json ? { metadata: JSON.parse(row.metadata_json) as Record<string, unknown> } : {})
+      ...(row.metadata_json ? { metadata: JSON.parse(row.metadata_json) as Record<string, unknown> } : {}),
+      ...(row.prompt_message_id ? { promptMessageId: row.prompt_message_id } : {})
     };
+  }
+
+  getConversationByPrompt(userId: number, promptMessageId: number): ReturnType<Store["getConversation"]> {
+    const row = this.db.prepare("SELECT mail_id FROM conversations WHERE telegram_user_id=? AND prompt_message_id=? ORDER BY updated_at DESC LIMIT 1")
+      .get(userId, promptMessageId) as { mail_id: number } | undefined;
+    return row ? this.getConversation(userId, row.mail_id) : undefined;
   }
 
   clearConversation(userId: number, mailId: number): void {

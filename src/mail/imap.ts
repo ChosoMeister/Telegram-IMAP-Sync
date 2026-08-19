@@ -6,6 +6,7 @@ import type { Logger } from "../logger.js";
 import type { MailRule } from "../rules.js";
 import { parsedMailToIncoming } from "./content.js";
 import { describeError } from "../errors.js";
+import { normalizeMessageId } from "./thread.js";
 
 export class ImapService {
   private client?: ImapFlow;
@@ -116,14 +117,22 @@ export class ImapService {
   }
 
   async archive(mail: StoredMail): Promise<void> {
+    return this.archiveMany([mail]);
+  }
+
+  async archiveMany(mails: StoredMail[]): Promise<void> {
     if (!this.config.IMAP_ARCHIVE_MAILBOX) throw new Error("IMAP_ARCHIVE_MAILBOX is not configured");
     if (this.config.APP_MODE !== "live") throw new Error("Archive is disabled in dry-run mode");
+    if (!mails.length) return;
+    const mailbox = mails[0]!.mailbox;
+    if (mails.some((mail) => mail.mailbox !== mailbox)) throw new Error("Thread members span multiple source mailboxes");
     const client = this.requireClient();
-    const lock = await client.getMailboxLock(mail.mailbox);
+    const lock = await client.getMailboxLock(mailbox);
     try {
-      await client.messageMove({ uid: mail.uid }, this.config.IMAP_ARCHIVE_MAILBOX, { uid: true });
-      const remains = await client.search({ uid: mail.uid }, { uid: true });
-      if (remains && remains.length) throw new Error("IMAP move was not verified; message remains in Inbox");
+      const uids = mails.map((mail) => mail.uid).join(",");
+      await client.messageMove(uids, this.config.IMAP_ARCHIVE_MAILBOX, { uid: true });
+      const remains = await client.search({ uid: uids }, { uid: true });
+      if (remains && remains.length) throw new Error("IMAP thread move was not verified; one or more messages remain in Inbox");
     } finally { lock.release(); }
   }
 
@@ -169,9 +178,8 @@ export class ImapService {
 
   async findThread(mail: StoredMail): Promise<IncomingMail[]> {
     const client = this.requireClient();
-    const identifiers = [...new Set([mail.messageId].filter((value): value is string => Boolean(value)))]
-      .map((value) => value.replace(/^<|>$/g, ""));
-    const subject = mail.subject.replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "").trim();
+    const identifiers = [...new Set([mail.messageId, mail.inReplyTo, ...mail.references]
+      .map(normalizeMessageId).filter((value): value is string => Boolean(value)))];
     const boxes = await client.list();
     const archive = this.config.IMAP_ARCHIVE_MAILBOX ?? boxes.find((box) => box.specialUse === "\\Archive")?.path;
     const sent = this.config.IMAP_SENT_MAILBOX ?? boxes.find((box) => box.specialUse === "\\Sent")?.path;
@@ -186,7 +194,6 @@ export class ImapService {
         const queries: any[] = identifiers.flatMap((id) => [
           { header: { "message-id": id } }, { header: { "in-reply-to": id } }, { header: { references: id } }
         ]);
-        if (subject) queries.push({ subject });
         if (!queries.length) continue;
         const foundSet = new Set<number>();
         for (const criteria of queries) {

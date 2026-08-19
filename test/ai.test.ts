@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AiService, normalizePersianStyle } from "../src/ai.js";
+import { AiService, normalizePersianStyle, normalizeReplyHonorific } from "../src/ai.js";
 import { Logger } from "../src/logger.js";
 import { config, incoming } from "./helpers.js";
 
@@ -7,6 +7,10 @@ describe("AI analysis normalization", () => {
   it("enforces the configured Persian administrative wording deterministically", () => {
     expect(normalizePersianStyle("با سلام و احترام،\nمتشکرم.\nبا تشکر")).toBe("با درود و مهر،\nسپاسگزارم.\nبا سپاس");
     expect(normalizePersianStyle("كار شما تاييد شد")).toBe("کار شما تایید شد");
+  });
+  it("removes guessed gender and applies only a verified honorific", () => {
+    expect(normalizeReplyHonorific("سرکار خانم ناصر طبسی،\nبا درود و مهر")).toBe("ناصر طبسی،\nبا درود و مهر");
+    expect(normalizeReplyHonorific("جناب آقای صبا ساده،\nبا درود و مهر", "خانم")).toBe("سرکار خانم صبا ساده،\nبا درود و مهر");
   });
   it("accepts a null optional deadline from an OpenAI-compatible provider", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({

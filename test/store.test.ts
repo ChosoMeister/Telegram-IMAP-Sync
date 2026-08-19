@@ -39,6 +39,18 @@ describe("Store", () => {
     expect(store.getConversation(42, first.id)?.draft).toBe("first draft");
     expect(store.getConversation(42, second.id)).toBeUndefined();
   });
+  it("merges only exact RFC thread identifiers and maps ForceReply prompts exactly", () => {
+    const root = store.upsertMail(incoming);
+    const reply = store.upsertMail({ ...incoming, uid: 8, messageId: "<reply@example.com>", inReplyTo: incoming.messageId, subject: "Re: Test" });
+    const sameSubject = store.upsertMail({ ...incoming, uid: 9, messageId: "<unrelated@example.com>" });
+    expect(store.threadMembers(root.id).map((mail) => mail.id)).toEqual([root.id, reply.id]);
+    expect(store.threadMembers(sameSubject.id).map((mail) => mail.id)).toEqual([sameSubject.id]);
+    expect(store.threadRepresentative(root.id)?.id).toBe(reply.id);
+    store.setConversation(42, root.id, "instruction", false, "formal", undefined, undefined, 1001);
+    store.setConversation(42, sameSubject.id, "instruction", false, "formal", undefined, undefined, 1002);
+    expect(store.getConversationByPrompt(42, 1001)?.mailId).toBe(root.id);
+    expect(store.getConversationByPrompt(42, 1002)?.mailId).toBe(sameSubject.id);
+  });
   it("durably tracks one outbound RFC822 payload through all stages", () => {
     const { id } = store.upsertMail(incoming);
     const created = store.createOutbound(id, "reply", "<stable@example.com>", Buffer.from("raw-message"));

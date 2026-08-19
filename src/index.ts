@@ -10,6 +10,7 @@ import { SmtpService } from "./mail/smtp.js";
 import { TelegramApi } from "./telegram/api.js";
 import { MailBotApp } from "./app.js";
 import { MailRuleService } from "./rules.js";
+import { loadHonorifics } from "./honorifics.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -19,7 +20,7 @@ async function main(): Promise<void> {
   const imap = new ImapService(config, logger);
   const smtp = new SmtpService(config);
   const telegram = new TelegramApi(config);
-  const ai = new AiService(config, logger);
+  const ai = new AiService(config, logger, await loadHonorifics(config.HONORIFICS_PATH));
   const rules = await MailRuleService.load(config.MAIL_RULES_PATH);
   const app = new MailBotApp(config, store, imap, smtp, telegram, ai, logger, rules);
 

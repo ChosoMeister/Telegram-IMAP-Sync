@@ -20,7 +20,7 @@ In PowerShell, use `Copy-Item .env.example .env`. Keep Docker Desktop in Linux-c
 
 GHCR publishes `latest`, the package version, and immutable `sha-<commit>` tags for Linux `amd64` and `arm64`. Pulling is useful for inspection or custom deployment; the repository Compose file intentionally builds the checked-out source so code and configuration stay auditable.
 
-Version 0.3.0 automatically creates versioned SQLite migrations on first start. Existing Inbox messages that contain pre-0.3 attachment metadata are refetched once, reclassified, and edited in place; this does not generate replacement cards.
+Version 0.4.0 adds thread and ForceReply migrations automatically on first start. Existing exact RFC-related pending items are consolidated into the newest representative card; missing/stale cards are recreated silently. Existing Inbox messages that contain pre-0.3 attachment metadata are refetched once, reclassified, and edited in place.
 
 ## Commission safely
 
@@ -87,11 +87,13 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Ollama unavailable:** confirm the host listener accepts Docker traffic and use `host.docker.internal`, not container loopback.
 - **Reply delivered but no sent copy:** verify `IMAP_SENT_MAILBOX` and APPEND permission. The transaction remains at the Sent-copy stage and does not blindly repeat accepted SMTP.
 - **Ambiguous SMTP attempt:** inspect the configured sent mailbox for the persisted Message-ID before any manual retry. Duplicate prevention intentionally wins over automatic resend.
-- **Telegram and Inbox counts differ:** wait for two reconciliation cycles. External moves are confirmed twice before card cleanup. Ensure `TEST_IMPORT_LIMIT=0`.
+- **Telegram and Inbox counts differ:** one Telegram card now represents one exact pending thread, so fewer cards than Inbox messages is expected. `/status` and health expose `pendingThreads` and `pending` separately. External moves are confirmed twice before cleanup; ensure `TEST_IMPORT_LIMIT=0`.
 - **Old Telegram card cannot be deleted:** Telegram limits deletion of old messages. Rotation reduces this risk, but prolonged bot downtime can exceed that window.
 - **Signature images still appear as attachments:** inspect `classificationReason` through the hidden-image review, retain a sanitized MIME sample, and add a regression fixture. Do not globally hide all small images because screenshots may be legitimate attachments.
 - **A real image was hidden:** use `Review hidden images`; the file remains retrievable and is not forwarded by default. Classification changes require refetching that Inbox message or receiving a new copy.
-- **Thread has unrelated messages:** repeated generic subjects can produce false candidates. Message-ID relationships are preferred; lower `THREAD_MAX_MESSAGES` and retain exact `References` headers when collecting a sanitized fixture.
+- **Thread has unrelated messages:** version 0.4.0 never merges by subject. Retain sanitized `Message-ID`, `In-Reply-To`, and `References` headers for diagnosis; malformed or reused sender IDs cannot be repaired safely by subject guessing.
+- **Wrong خانم/آقای in an AI draft:** unknown recipients must be neutral. For a verified person only, copy `config/honorifics.example.json` to ignored `config/honorifics.json`, use the lowercase email as key, and restart. Never commit the real directory.
+- **Bot ignores typed instructions:** free-form input must be sent using Telegram Reply to the exact prompt produced for that mail. This is deliberate protection when several drafts/questions are open.
 - **Ask AI reports unsupported attachment:** current extraction supports PDF, DOCX, HTML, and text/CSV-like formats. Images require OCR and legacy DOC/XLS or XLSX require a future isolated converter.
 - **AI feels stuck:** the primary Telegram card changes immediately to a progress state. Each provider is limited by `AI_TIMEOUT_MS` (45 seconds by default) before fallback; structured logs include the nested network code and cause.
 - **Brief IMAP warning followed by restored:** Exchange or the network closed the long-lived session. Reconciliation waits for the reconnect supervisor and retries automatically; investigate only when health remains `503` or reconnect does not follow.

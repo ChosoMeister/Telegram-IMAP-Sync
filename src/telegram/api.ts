@@ -1,6 +1,12 @@
 import type { AppConfig } from "../config.js";
 
-export interface TelegramMessage { message_id: number; text?: string; from?: { id: number }; chat: { id: number }; }
+export interface TelegramMessage {
+  message_id: number;
+  text?: string;
+  from?: { id: number };
+  chat: { id: number };
+  reply_to_message?: Pick<TelegramMessage, "message_id">;
+}
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;

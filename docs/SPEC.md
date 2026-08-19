@@ -20,16 +20,18 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 12. If the process dies during an SMTP attempt, automatic resend is blocked unless the stable Message-ID is already found in Sent; this favors duplicate prevention over an unsafe blind retry.
 13. Done, Reply, and Forward acquire an expiring atomic per-mail lock before mutation.
 14. Images classified as inline/signature/uncertain are excluded from the primary attachment count and Forward, but remain explicitly reviewable by the user.
+15. Messages merge into a Telegram card only through exact normalized `Message-ID`, `In-Reply-To`, or `References`; subject similarity is never sufficient.
+16. Free-form input is accepted only as a direct reply to the exact ForceReply prompt that opened its mail-scoped workflow.
 
 ## Telegram lifecycle
 
 - Initial import scans all messages currently in Inbox, oldest first.
-- A new item contains sender, subject, time, AI summary/priority, suggested action, and real attachment count.
+- A new item contains sender, subject, time, AI summary/priority, suggested action, and real attachment count. A later Inbox reply in the same exact RFC thread replaces/recreates the representative card at the bottom and displays the pending messages as chronological sections.
 - `Full text` extracts plain text or sanitized HTML and paginates it by editing the same Telegram card, with `Back` restoring the summary.
 - `Attachments` retrieves real attachments from IMAP and sends them into the chat.
 - `Hidden images` retrieves signature/inline/uncertain images only on demand; Back removes those temporary Telegram messages.
 - `Ask AI` accepts a free-form question scoped to the current mail, extractable real attachments, or the discovered thread, and renders the answer on the same card.
-- `Thread` searches Inbox, configured/discovered Archive, and configured/discovered Sent by Message-ID relationships and normalized subject, then shows an AI status summary and compact timeline.
+- `Thread` searches Inbox, configured/discovered Archive, and configured/discovered Sent only by exact Message-ID relationships, then shows an AI status summary and compact timeline.
 - All Telegram message IDs belonging to a mail are tracked for Done cleanup.
 - Every 36 hours, the full pending queue is silently refreshed oldest-to-newest. Each replacement card is sent and persisted before the previous card is deleted, avoiding a gap if Telegram delivery fails and preserving visual order.
 - If the bot is offline beyond Telegram's deletion window, old content may not be deletable; this is a platform limitation.
@@ -47,6 +49,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 7. After Sent storage succeeds, the state becomes `sent_pending_archive` before the source message is moved from Inbox.
 8. A failure offers retry for only the incomplete stage; SMTP is never repeated after acceptance.
 9. Archive success completes the item and removes its Telegram card without adding a separate success message.
+10. Reply always targets the newest pending message in a merged thread; successful completion archives every pending Inbox member of that thread.
 
 ## Forward lifecycle
 
@@ -60,7 +63,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 
 Providers are ordered through `AI_PROVIDER_ORDER`, for example `proxy,ollama` or `ollama,proxy`. Both analysis and reply drafting use the same fallback chain. Failure of every provider leaves the email usable without analysis. Email contents are never logged.
 
-All user-visible AI values use polished administrative Persian. Generated mail must use `با درود و مهر` instead of `با سلام و احترام`/`با سلام`, and `با سپاس` instead of `با تشکر`. The system prompt states this policy for every provider, and a deterministic output normalizer enforces the replacements and Persian `ی`/`ک` before display or sending. Direct manual edits remain exactly as entered by the user.
+All user-visible AI values use polished administrative Persian. Generated mail must use `با درود و مهر` instead of `با سلام و احترام`/`با سلام`, and `با سپاس` instead of `با تشکر`. The system prompt states this policy for every provider, and a deterministic output normalizer enforces the replacements and Persian `ی`/`ک` before display or sending. The model must not infer gender: unknown recipients receive neutral wording, while optional verified per-address titles may be configured locally. Direct manual edits remain exactly as entered by the user.
 
 The analysis contract is JSON containing importance, score, Persian summary, suggested action, optional deadline, and reason. Email content is untrusted data and must not override the system prompt.
 

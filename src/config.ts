@@ -11,6 +11,7 @@ const schema = z.object({
   BACKUP_RETENTION: z.coerce.number().int().min(1).default(7),
   DATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
   MAIL_RULES_PATH: z.string().optional(),
+  HONORIFICS_PATH: z.string().optional(),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
 
   IMAP_HOST: z.string().min(1),

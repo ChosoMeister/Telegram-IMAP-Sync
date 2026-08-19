@@ -24,6 +24,7 @@ export class MailBotApp {
   private lastTelegramPoll?: Date;
   private inboxCount = 0;
   private jobWorkerRunning = false;
+  private cardsVerified = false;
   constructor(
     private config: AppConfig, private store: Store, private imap: ImapService,
     private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger,
@@ -106,7 +107,6 @@ export class MailBotApp {
     }
     this.syncRunning = true;
     try {
-      const newMail: StoredMail[] = [];
       const mailbox = this.imap.mailboxIdentity();
       const knownUids = this.store.listKnownUids(mailbox.path, mailbox.uidValidity);
       for (const incoming of await this.imap.scanInbox(knownUids)) {
@@ -130,23 +130,14 @@ export class MailBotApp {
           }
         }
         if (!result.created) {
-          const existing = this.store.getMail(result.id)!;
-          if (!existing.telegramMessageIds.length) await this.publish(existing, silent);
-          else await this.enrichTelegram(existing);
           continue;
         }
-        const mail = this.store.getMail(result.id)!;
-        await this.publish(mail, silent);
-        newMail.push(mail);
       }
       const liveUids = await this.imap.listInboxUids();
       this.inboxCount = liveUids.size;
       await this.reconcileRemovedMail(mailbox.path, mailbox.uidValidity, liveUids);
       await this.cleanupNonActionableCards();
-      for (const mail of this.store.listPending().filter((item) => !item.telegramMessageIds.length)) {
-        await this.publish(mail, silent);
-        this.logger.info("Recovered missing Telegram card from local state", { mailId: mail.id });
-      }
+      await this.normalizePendingThreadCards(silent);
       const analysisTargets = this.store.listPending().filter((mail) => !mail.analysis);
       for (const mail of analysisTargets) this.store.enqueueJob("analyze", mail.id);
       void this.processJobs();
@@ -174,7 +165,8 @@ export class MailBotApp {
           const analysis = await this.ai.analyze(mail);
           if (!analysis) throw new Error("All AI providers failed");
           this.store.setAnalysis(mail.id, analysis);
-          await this.enrichTelegram(this.store.getMail(mail.id)!);
+          const representative = this.store.threadRepresentative(mail.id);
+          if (representative) await this.enrichTelegram(representative);
           this.store.completeJob(job.id);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -215,25 +207,55 @@ export class MailBotApp {
   }
 
   private async publish(mail: StoredMail, silent: boolean): Promise<void> {
-    const sent = await this.telegram.sendMessage(renderMail(mail), mailButtons(mail), silent);
+    const thread = this.store.threadMembers(mail.id);
+    const sent = await this.telegram.sendMessage(renderMail(mail, thread), mailButtons(mail, thread), silent);
     this.store.setTelegramMessages(mail.id, [sent.message_id]);
   }
 
   private async enrichTelegram(mail: StoredMail): Promise<void> {
     const primaryId = mail.telegramMessageIds[0];
     if (!primaryId) return;
-    await this.telegram.editMessage(primaryId, renderMail(mail), mailButtons(mail)).catch((error) =>
-      this.logger.warn("Telegram enrichment edit failed", { mailId: mail.id, error: String(error) })
-    );
+    const thread = this.store.threadMembers(mail.id);
+    try { await this.telegram.editMessage(primaryId, renderMail(mail, thread), mailButtons(mail, thread)); }
+    catch (error) {
+      const message = describeError(error);
+      if (/message to edit not found/i.test(message)) {
+        this.store.setTelegramMessages(mail.id, []);
+        await this.publish(this.store.getMail(mail.id)!, true);
+        this.logger.info("Missing Telegram card republished", { mailId: mail.id, staleMessageId: primaryId });
+        return;
+      }
+      this.logger.warn("Telegram enrichment edit failed", { mailId: mail.id, error: message });
+    }
+  }
+
+  private async normalizePendingThreadCards(silent: boolean): Promise<void> {
+    const representatives = this.store.listPendingCards();
+    const representativeIds = new Set(representatives.map((mail) => mail.id));
+    for (const mail of this.store.listPending()) {
+      if (representativeIds.has(mail.id) || !mail.telegramMessageIds.length) continue;
+      await this.telegram.deleteMessages(mail.telegramMessageIds).catch(() => false);
+      this.store.setTelegramMessages(mail.id, []);
+      this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
+    }
+    for (const representative of representatives) {
+      const current = this.store.getMail(representative.id)!;
+      if (!current.telegramMessageIds.length) {
+        await this.publish(current, silent);
+        this.logger.info("Thread card published", { mailId: current.id, messageCount: this.store.threadMembers(current.id).length });
+      } else if (!this.cardsVerified) await this.enrichTelegram(current);
+    }
+    this.cardsVerified = true;
   }
 
   private async rotatePending(): Promise<void> {
     const cutoff = Date.now() - this.config.TELEGRAM_REFRESH_HOURS * 3_600_000;
-    const pending = this.store.listPending();
+    const pending = this.store.listPendingCards();
     if (!pending.some((m) => m.telegramCreatedAt && m.telegramCreatedAt.getTime() < cutoff)) return;
     for (const mail of pending) {
       const oldIds = [...mail.telegramMessageIds];
-      const sent = await this.telegram.sendMessage(renderMail(mail), mailButtons(mail), true);
+      const thread = this.store.threadMembers(mail.id);
+      const sent = await this.telegram.sendMessage(renderMail(mail, thread), mailButtons(mail, thread), true);
       this.store.setTelegramMessages(mail.id, [sent.message_id, ...oldIds]);
       if (oldIds.length) await this.telegram.deleteMessages(oldIds).catch(() => false);
       this.store.setTelegramMessages(mail.id, [sent.message_id]);
@@ -277,7 +299,9 @@ export class MailBotApp {
   private async handleCallback(callbackId: string, data: string): Promise<void> {
     const match = /^m:(\d+):(summary|body(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|done|reply|replyall|forward|instruct|edit|formal|short|friendly|send|cancel)$/.exec(data);
     if (!match) return;
-    const mail = this.store.getMail(Number(match[1]));
+    const requestedMailId = Number(match[1]);
+    const requestedMail = this.store.getMail(requestedMailId);
+    const mail = requestedMail ? this.store.threadRepresentative(requestedMail.id) ?? requestedMail : undefined;
     if (!mail) { await this.answerCallback(callbackId, "ایمیل پیدا نشد"); return; }
     if (match[2] === "done" && mail.state === "done") {
       await this.answerCallback(callbackId, "این ایمیل قبلاً انجام شده است");
@@ -293,7 +317,7 @@ export class MailBotApp {
     }
     await this.answerCallback(callbackId);
     const action = match[2];
-    this.logger.info("Telegram action received", { mailId: mail.id, action });
+    this.logger.info("Telegram action received", { mailId: mail.id, requestedMailId, action });
     if (action === "summary") return this.showSummary(mail);
     if (action?.startsWith("body")) return this.showBody(mail, Number(action.split(":")[1] ?? 0));
     if (action === "files") return this.showFiles(mail);
@@ -311,6 +335,7 @@ export class MailBotApp {
       const prompt = await this.telegram.sendMessage(action === "edit"
         ? `متن نهایی ${isForward ? "همراه فوروارد" : "پاسخ"} را دقیقاً همان‌طور که باید ارسال شود بنویسید:`
         : `بگویید متن همراه ${isForward ? "فوروارد" : "پاسخ"} چه چیزی را بیان کند؛ AI آن را با متن ایمیل و لحن انتخابی ترکیب می‌کند:`, undefined, false, true);
+      this.store.setConversationPrompt(this.config.TELEGRAM_USER_ID, mail.id, prompt.message_id);
       this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
       return;
     }
@@ -351,10 +376,12 @@ export class MailBotApp {
       { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
     ]]);
     const ids = [...mail.telegramMessageIds];
-    for (const attachment of mail.attachments.filter((a) => a.isRealAttachment)) {
-      const content = await this.imap.fetchAttachment(mail, attachment);
-      const sent = await this.telegram.sendDocument(attachment.filename, content, mail.subject);
-      ids.push(sent.message_id);
+    for (const member of this.store.threadMembers(mail.id)) {
+      for (const attachment of member.attachments.filter((a) => a.isRealAttachment)) {
+        const content = await this.imap.fetchAttachment(member, attachment);
+        const sent = await this.telegram.sendDocument(attachment.filename, content, member.subject);
+        ids.push(sent.message_id);
+      }
     }
     this.store.setTelegramMessages(mail.id, ids, mail.telegramCreatedAt);
     await this.editPrimary(this.store.getMail(mail.id)!, "📎 فایل‌ها در همین چت ارسال شدند. پس از بازگشت، فایل‌های موقت تلگرام پاک می‌شوند.", [[
@@ -368,11 +395,12 @@ export class MailBotApp {
     await this.editPrimary(mail, "🖼 در حال دریافت تصاویر مخفی‌شده…", [[
       { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
     ]]);
-    const hidden = mail.attachments.filter((attachment) => !attachment.isRealAttachment);
+    const members = this.store.threadMembers(mail.id);
+    const hidden = members.flatMap((member) => member.attachments.filter((attachment) => !attachment.isRealAttachment).map((attachment) => ({ member, attachment })));
     const ids = [...mail.telegramMessageIds];
-    for (const attachment of hidden) {
-      const content = await this.imap.fetchAttachment(mail, attachment);
-      const sent = await this.telegram.sendDocument(attachment.filename, content, `${mail.subject}\n${attachment.classificationReason ?? "تصویر مخفی‌شده"}`);
+    for (const { member, attachment } of hidden) {
+      const content = await this.imap.fetchAttachment(member, attachment);
+      const sent = await this.telegram.sendDocument(attachment.filename, content, `${member.subject}\n${attachment.classificationReason ?? "تصویر مخفی‌شده"}`);
       ids.push(sent.message_id);
     }
     this.store.setTelegramMessages(mail.id, ids, mail.telegramCreatedAt);
@@ -394,6 +422,7 @@ export class MailBotApp {
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "ai_question", false, "formal", undefined, { kind: "ask", context });
     const label = context === "thread" ? "کل مکالمه" : context === "attachments" ? "ایمیل و پیوست‌های قابل استخراج" : "این ایمیل";
     const prompt = await this.telegram.sendMessage(`سؤال خود را درباره ${label} بنویسید:`, undefined, false, true);
+    this.store.setConversationPrompt(this.config.TELEGRAM_USER_ID, mail.id, prompt.message_id);
     this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
     await this.editPrimary(mail, `✨ منتظر سؤال شما درباره ${label} هستم…`, [[
       { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
@@ -422,7 +451,9 @@ export class MailBotApp {
     if (auxiliary.length) await this.telegram.deleteMessages(auxiliary).catch(() => false);
     this.store.setTelegramMessages(mail.id, current.telegramMessageIds.slice(0, 1), current.telegramCreatedAt);
     this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
-    await this.editPrimary(this.store.getMail(mail.id)!, renderMail(this.store.getMail(mail.id)!), mailButtons(this.store.getMail(mail.id)!));
+    const refreshed = this.store.getMail(mail.id)!;
+    const thread = this.store.threadMembers(mail.id);
+    await this.editPrimary(refreshed, renderMail(refreshed, thread), mailButtons(refreshed, thread));
   }
 
   private async editPrimary(mail: StoredMail, text: string, buttons: Parameters<TelegramApi["editMessage"]>[2]): Promise<void> {
@@ -440,11 +471,13 @@ export class MailBotApp {
     this.store.setState(mail.id, "processing");
     try {
       await this.editPrimary(mail, "⏳ در حال انتقال ایمیل به Archive و پاک‌سازی کارت…", []);
-      await this.imap.archive(mail);
+      const members = this.store.threadMembers(mail.id);
+      await this.imap.archiveMany(members);
       await this.telegram.deleteMessages(mail.telegramMessageIds);
       this.store.setTelegramMessages(mail.id, []);
-      this.store.setState(mail.id, "done");
-      this.logger.info("Mail archived and Telegram messages deleted", { mailId: mail.id });
+      this.store.setThreadState(mail.id, "done");
+      for (const member of members) this.store.clearConversation(this.config.TELEGRAM_USER_ID, member.id);
+      this.logger.info("Mail thread archived and Telegram messages deleted", { mailId: mail.id, messageCount: members.length });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.store.setState(mail.id, "failed", message);
@@ -476,6 +509,7 @@ export class MailBotApp {
     }
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_recipients", false, "formal", undefined, { kind: "forward" });
     const prompt = await this.telegram.sendMessage("آدرس ایمیل گیرنده را وارد کنید. برای چند گیرنده، آدرس‌ها را با ویرگول جدا کنید:", undefined, false, true);
+    this.store.setConversationPrompt(this.config.TELEGRAM_USER_ID, mail.id, prompt.message_id);
     this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
     await this.editPrimary(mail, "↪️ منتظر آدرس گیرنده فوروارد هستم…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
   }
@@ -487,15 +521,23 @@ export class MailBotApp {
         `<b>وضعیت MailBot</b>`,
         `IMAP: ${status.imapConnected ? "✅ متصل" : "❌ قطع"}`,
         `Inbox: ${status.inboxCount}`,
-        `Pending: ${status.pending}`,
+        `کارت‌های Pending: ${status.pendingThreads}`,
+        `پیام‌های Pending: ${status.pending}`,
         `Failed: ${status.failed}`,
         `آخرین Sync: ${esc(String(status.lastSuccessfulSync ?? "نامشخص"))}`,
         `آخرین Telegram Poll: ${esc(String(status.lastTelegramPoll ?? "نامشخص"))}`
       ].join("\n"), undefined, true);
       return;
     }
-    const conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID);
-    if (!conversation || !["instruction", "manual_edit", "forward_recipients", "ai_question"].includes(conversation.mode)) return;
+    const promptMessageId = message.reply_to_message?.message_id;
+    const conversation = promptMessageId ? this.store.getConversationByPrompt(this.config.TELEGRAM_USER_ID, promptMessageId) : undefined;
+    if (!conversation || !["instruction", "manual_edit", "forward_recipients", "ai_question"].includes(conversation.mode)) {
+      const active = this.store.getConversation(this.config.TELEGRAM_USER_ID);
+      if (active && ["instruction", "manual_edit", "forward_recipients", "ai_question"].includes(active.mode)) {
+        await this.telegram.sendMessage("برای جلوگیری از انتخاب ایمیل اشتباه، متن را فقط با Reply مستقیم به پیام درخواست ربات ارسال کنید.", undefined, true);
+      }
+      return;
+    }
     const mail = this.store.getMail(conversation.mailId);
     if (!mail) return;
     if (conversation.mode === "ai_question") {
@@ -669,10 +711,11 @@ export class MailBotApp {
         this.store.markOutbound(mail.id, "sent");
         this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "sent_pending_archive", conversation.replyAll, conversation.tone, conversation.draft);
       }
-      await this.imap.archive(mail);
+      const members = this.store.threadMembers(mail.id);
+      await this.imap.archiveMany(members);
       await this.telegram.deleteMessages(mail.telegramMessageIds);
       this.store.setTelegramMessages(mail.id, []);
-      this.store.setState(mail.id, "done");
+      this.store.setThreadState(mail.id, "done");
       this.store.markOutbound(mail.id, "complete");
       this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
       this.logger.info("Reply sent, saved to Sent, mail archived and Telegram cleaned", { mailId: mail.id, replyAll: conversation.replyAll });
@@ -717,10 +760,11 @@ export class MailBotApp {
         this.store.markOutbound(mail.id, "sent");
         this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_sent_pending_archive", false, conversation.tone, conversation.draft, conversation.metadata);
       }
-      await this.imap.archive(mail);
+      const members = this.store.threadMembers(mail.id);
+      await this.imap.archiveMany(members);
       await this.telegram.deleteMessages(mail.telegramMessageIds);
       this.store.setTelegramMessages(mail.id, []);
-      this.store.setState(mail.id, "done");
+      this.store.setThreadState(mail.id, "done");
       this.store.markOutbound(mail.id, "complete");
       this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
       this.logger.info("Mail forwarded with attachments, saved to Sent, archived and Telegram cleaned", { mailId: mail.id, recipientCount: recipients.length });

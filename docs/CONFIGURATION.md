@@ -14,6 +14,7 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `BACKUP_RETENTION` | `7` | Number of newest online backups retained. |
 | `DATA_RETENTION_DAYS` | `90` | Deletes only completed local SQLite records after this age; Exchange messages remain untouched. |
 | `MAIL_RULES_PATH` | unset | JSON rule file, normally `/app/config/mail-rules.json`. |
+| `HONORIFICS_PATH` | unset | Optional JSON map of lowercase email addresses to verified `خانم` or `آقای`; normally `/app/config/honorifics.json`. Unknown people are addressed neutrally. |
 | `HEALTH_PORT` | `8080` | Container health/status HTTP port. Compose exposes it as loopback port 18080. |
 
 ## IMAP and SMTP
@@ -65,8 +66,8 @@ Unknown providers in `AI_PROVIDER_ORDER` fail that attempt and allow the next pr
 
 Ask AI supports the current email, its real extractable attachments, or its thread. Extractable formats are PDF, DOCX, HTML, TXT, CSV, TSV, JSON, XML, and log/text MIME types. Unsupported and oversized files are named in the context with a reason rather than parsed. Files are processed in memory and are not persisted by the extractor.
 
-The Persian administrative wording policy is intentionally not configurable per provider: every configured model receives the same instruction and every generated result is normalized before use. Manual edits entered in Telegram bypass this normalization and remain verbatim.
+The Persian administrative wording policy is intentionally not configurable per provider: every configured model receives the same instruction and every generated result is normalized before use. Reply drafts never infer gender. Copy `config/honorifics.example.json` to the ignored `config/honorifics.json` only for people whose title is known and verified. Manual edits entered in Telegram bypass this normalization and remain verbatim.
 
 ## Production minimum
 
-Set real values for IMAP, SMTP, Telegram, archive, and sent-mail settings; set `TEST_IMPORT_LIMIT=0`. Run `npm run discover` and `npm run preflight` in the built container before switching `APP_MODE=live`. Keep `.env`, `config/mail-rules.json`, and backup files outside Git.
+Set real values for IMAP, SMTP, Telegram, archive, and sent-mail settings; set `TEST_IMPORT_LIMIT=0`. Run `npm run discover` and `npm run preflight` in the built container before switching `APP_MODE=live`. Keep `.env`, `config/mail-rules.json`, `config/honorifics.json`, and backup files outside Git.

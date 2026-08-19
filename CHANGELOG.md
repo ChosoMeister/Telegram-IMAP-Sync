@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 - 2026-08-19
+
+- Consolidate exact RFC-related Inbox replies into one chronological Telegram card represented by the newest pending message.
+- Archive all pending Inbox members together after Done, Reply, or Forward, while Reply targets the newest message.
+- Bind instructions, edits, forwarding recipients, and AI questions to their exact Telegram ForceReply prompt to prevent cross-mail selection.
+- Remove subject-only thread matching and use normalized Message-ID, In-Reply-To, and References relationships exclusively.
+- Recreate stale/missing Telegram cards silently and keep thread cards correctly ordered when a new reply arrives.
+- Prevent AI gender inference, strip unverified Persian gendered titles, and add an optional ignored per-address verified honorific map.
+- Report pending thread cards separately from pending Inbox messages and expand regression coverage and documentation.
+
 ## 0.3.3 - 2026-08-19
 
 - Increase the default AI provider timeout to 45 seconds for large organizational models and complex Reply generation.

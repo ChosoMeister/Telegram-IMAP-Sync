@@ -12,7 +12,7 @@ Telegram long polling <── action controller <──────────�
         └── reply workflow ──> thread context ──> SMTP reply ──> Sent APPEND ──> IMAP MOVE
 ```
 
-The service uses direct adapters rather than coupling domain state to a bot framework. SQLite runs in WAL mode and stores mail identity, normalized attachment classification, AI results, Telegram message IDs, update offsets, mail-scoped conversations, outbound transactions, action locks, schema migrations, and durable jobs. Navigating a different card cannot clear another mail's draft or AI question.
+The service uses direct adapters rather than coupling domain state to a bot framework. SQLite runs in WAL mode and stores mail identity, exact RFC-derived thread keys, normalized attachment classification, AI results, Telegram message IDs, update offsets, mail-scoped conversations with exact ForceReply prompt IDs, outbound transactions, action locks, schema migrations, and durable jobs. Navigating a different card cannot clear another mail's draft or AI question.
 
 The container is read-only except for `/data` and `/tmp`, drops Linux capabilities, binds health only to loopback on the host, and uses a named volume for portability across Linux, macOS, and Windows Docker hosts.
 
@@ -27,6 +27,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - Reconciliation is deferred while IMAP is unavailable; the reconnect supervisor performs the retry after restoring the mailbox session.
 - Readiness requires both fresh IMAP reconciliation and a successful Telegram poll within two minutes; startup receives a 90-second Telegram grace period.
 - Duplicate IMAP events are harmless because of the unique identity constraint.
+- Only exact normalized Message-ID relationships form a thread. The newest pending Inbox member owns the Telegram card; older member cards are removed, and Done/Reply/Forward archive the actionable group together.
 - Telegram API rate limits honor `retry_after`; transient retries are limited to operations that cannot create duplicate chat messages.
 - Failed Done operations remain visible and retryable.
 - Pending items absent from Inbox on two consecutive reconciliations are treated as externally completed and their Telegram content is removed.
@@ -34,6 +35,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - SMTP-success/Sent-copy-pending and Sent-copy-success/archive-pending are distinct states, so retries cannot duplicate the reply.
 - AI results are optional and can be regenerated after restart.
 - AI output passes through a provider-independent Persian style normalizer; therefore fallback-provider changes cannot reintroduce disallowed greetings or closings.
+- Reply output also passes through a gender-safety normalizer: it strips unverified gendered titles and applies only an optional exact email-address override.
 - AI analysis jobs are leased from SQLite; abandoned leases return to the queue and repeated provider failures are bounded.
 - Legacy Inbox payloads missing attachment classification are refetched once and their existing Telegram cards are edited in place.
 - Thread lookup temporarily opens Inbox/Archive/Sent mailboxes and restores the configured Inbox before normal reconciliation resumes.

@@ -8,6 +8,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 
 - Full Inbox import plus lightweight UID reconciliation; MIME and attachments are fetched only for new messages
 - Stable IMAP deduplication using mailbox, UIDVALIDITY, and UID
+- One Telegram card per exact RFC email thread; later Inbox replies replace the card at the bottom and show a chronological sectioned timeline
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
 - Persian priority, summary, suggested action, and deadline extraction
@@ -18,9 +19,11 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Done: verified Exchange archive, then Telegram cleanup
 - Pending queue rotation every 36 hours, oldest-to-newest and silent
 - AI-assisted Reply and Reply All with tone, custom instruction, direct editing, and explicit approval
+- Exact ForceReply-to-mail binding, preventing text meant for one open draft/question from being applied to another
 - AI-assisted Forward to one or more recipients with a custom note and original attachments
 - Free-form Ask AI over the current message, extractable PDF/DOCX/text attachments, or the full mail thread
 - Thread discovery across Inbox, Archive, and Sent with AI status summary and thread-aware reply drafts
+- Gender-neutral AI addressing by default, with optional verified per-address Persian honorifics
 - Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
@@ -65,7 +68,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.3.3
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.4.0
 ```
 
 ## Windows installation (Docker Desktop)
