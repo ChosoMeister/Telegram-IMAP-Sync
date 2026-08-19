@@ -31,23 +31,28 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
 
 export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
   const id = mail.id;
-  const bodyRow: Array<{ text: string; callback_data: string; style?: "danger" | "success" | "primary" }> = [
-    { text: thread.length > 1 ? "📄 آخرین پیام" : "📄 متن پیام", callback_data: `m:${id}:body`, style: "primary" }
-  ];
-  if (thread.length > 1) bodyRow.push({ text: "📚 متن همه پیام‌ها", callback_data: `m:${id}:allbody`, style: "primary" });
-  const rows: Array<Array<{ text: string; callback_data: string; style?: "danger" | "success" | "primary" }>> = [bodyRow];
-  if (thread.some((item) => item.attachments.some((a) => a.isRealAttachment))) rows[0]?.push({ text: "📎 دریافت فایل‌ها", callback_data: `m:${id}:files` });
-  if (thread.some((item) => item.attachments.some((a) => !a.isRealAttachment))) rows.push([{ text: "🖼 بررسی تصاویر مخفی", callback_data: `m:${id}:hidden` }]);
-  const actionRow = [
-    { text: "✅ انجام شد", callback_data: `m:${id}:done`, style: "success" },
+  type Button = { text: string; callback_data: string; style?: "danger" | "success" | "primary" };
+  const rows: Button[][] = [[
     { text: "↩️ پاسخ", callback_data: `m:${id}:reply`, style: "primary" },
-    { text: "↪️ فوروارد", callback_data: `m:${id}:forward`, style: "primary" }
-  ] as Array<{ text: string; callback_data: string; style?: "danger" | "success" | "primary" }>;
-  if (mail.cc.length || mail.to.length > 1) actionRow.push({ text: "👥 Reply All", callback_data: `m:${id}:replyall` });
-  rows.push(actionRow);
-  rows.push([
-    { text: "✨ از AI بپرس", callback_data: `m:${id}:ask`, style: "primary" }
-  ]);
+    { text: "✅ انجام شد", callback_data: `m:${id}:done`, style: "success" }
+  ]];
+  const secondary: Button[] = [{ text: "↪️ فوروارد", callback_data: `m:${id}:forward` }];
+  if (mail.cc.length || mail.to.length > 1) secondary.push({ text: "👥 پاسخ به همه", callback_data: `m:${id}:replyall` });
+  rows.push(secondary);
+
+  const bodyRow: Button[] = [{ text: thread.length > 1 ? "📄 آخرین پیام" : "📄 متن پیام", callback_data: `m:${id}:body` }];
+  if (thread.length > 1) {
+    bodyRow.push({ text: "📚 همه پیام‌ها", callback_data: `m:${id}:allbody` });
+    rows.push(bodyRow, [{ text: "✨ پرسش از AI", callback_data: `m:${id}:ask`, style: "primary" }]);
+  } else {
+    bodyRow.push({ text: "✨ پرسش از AI", callback_data: `m:${id}:ask`, style: "primary" });
+    rows.push(bodyRow);
+  }
+
+  const realCount = thread.reduce((count, item) => count + item.attachments.filter((attachment) => attachment.isRealAttachment).length, 0);
+  const hiddenCount = thread.reduce((count, item) => count + item.attachments.filter((attachment) => !attachment.isRealAttachment).length, 0);
+  if (realCount) rows.push([{ text: `📎 پیوست‌ها (${realCount})`, callback_data: `m:${id}:files` }]);
+  if (hiddenCount) rows.push([{ text: `🖼 موارد مخفی (${hiddenCount})`, callback_data: `m:${id}:hidden` }]);
   return rows;
 }
 
