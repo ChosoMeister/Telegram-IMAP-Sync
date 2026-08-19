@@ -26,6 +26,8 @@ export interface CalendarEvent {
   method?: string;
   uid?: string;
   status?: string;
+  sequence?: number;
+  recurrenceId?: string;
   summary?: string;
   description?: string;
   location?: string;

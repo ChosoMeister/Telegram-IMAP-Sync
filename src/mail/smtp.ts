@@ -4,6 +4,8 @@ import { simpleParser } from "mailparser";
 import type { AppConfig } from "../config.js";
 import type { ReplyDraft, StoredMail } from "../domain/types.js";
 
+export type CalendarResponse = "accept" | "tentative" | "decline";
+
 export class SmtpService {
   private transporter;
   private health: { ok?: boolean; lastSuccess?: string; lastError?: string } = {};
@@ -69,6 +71,24 @@ export class SmtpService {
     }).compile().build();
   }
 
+  async buildCalendarResponse(mail: StoredMail, response: CalendarResponse, messageId?: string): Promise<{ raw: Buffer; organizer: string }> {
+    const event = mail.calendar;
+    if (!event?.uid || !event.organizer?.address) throw new Error("Calendar UID or organizer is missing");
+    const attendee = event.attendees.find((item) => item.address.toLowerCase() === this.config.SMTP_FROM.toLowerCase());
+    if (!attendee) throw new Error("Configured sender is not an attendee of this invitation");
+    const partstat = ({ accept: "ACCEPTED", tentative: "TENTATIVE", decline: "DECLINED" } as const)[response];
+    const label = ({ accept: "پذیرفته شد", tentative: "شاید", decline: "رد شد" } as const)[response];
+    const ics = buildCalendarReply(mail, partstat, attendee);
+    const raw = await new MailComposer({
+      ...(messageId ? { messageId } : {}), from: this.config.SMTP_FROM, to: event.organizer.address,
+      subject: `${label}: ${event.summary || mail.subject}`,
+      text: `پاسخ تقویم: ${label}\n${event.summary || mail.subject}`,
+      inReplyTo: mail.messageId, references: [...mail.references, ...(mail.messageId ? [mail.messageId] : [])],
+      icalEvent: { filename: "reply.ics", method: "REPLY", content: ics }
+    }).compile().build();
+    return { raw, organizer: event.organizer.address };
+  }
+
   async sendForward(mail: StoredMail, recipients: string[], note: string, source: Buffer): Promise<Buffer> {
     if (this.config.APP_MODE !== "live") throw new Error("SMTP sending is disabled in dry-run mode");
     const raw = await this.buildForward(mail, recipients, note, source);
@@ -87,6 +107,23 @@ export class SmtpService {
     }
   }
 }
+
+function buildCalendarReply(mail: StoredMail, partstat: "ACCEPTED" | "TENTATIVE" | "DECLINED", attendee: { name?: string; address: string }): string {
+  const event = mail.calendar!;
+  const attendeeName = attendee.name ? `;CN=${quoteIcsParam(attendee.name)}` : "";
+  return [
+    "BEGIN:VCALENDAR", "PRODID:-//Telegram IMAP Sync//Calendar Reply//FA", "VERSION:2.0", "METHOD:REPLY", "BEGIN:VEVENT",
+    `UID:${escapeIcs(event.uid!)}`, `DTSTAMP:${toIcsUtc(new Date())}`, `SEQUENCE:${event.sequence ?? 0}`,
+    ...(event.recurrenceId ? [`RECURRENCE-ID:${event.recurrenceId}`] : []),
+    `ORGANIZER:mailto:${event.organizer!.address}`,
+    `ATTENDEE${attendeeName};PARTSTAT=${partstat}:mailto:${attendee.address}`,
+    "REQUEST-STATUS:2.0;Success", "END:VEVENT", "END:VCALENDAR", ""
+  ].join("\r\n");
+}
+
+function toIcsUtc(value: Date): string { return value.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z"); }
+function escapeIcs(value: string): string { return value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n"); }
+function quoteIcsParam(value: string): string { return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`; }
 
 function formatAddress(a: { name?: string; address: string }): string {
   return a.name ? `"${a.name.replace(/"/g, "\\\"")}" <${a.address}>` : a.address;

@@ -9,7 +9,7 @@ Telegram long polling <── action controller <──────────�
         │                         │
         ├── full body/files       ├── atomic lock ──> IMAP MOVE + verification
         ├── Ask AI ──> document extraction / thread lookup
-        └── reply workflow ──> thread context ──> SMTP reply ──> Sent APPEND ──> IMAP MOVE
+        └── reply/calendar workflow ──> durable RFC822 ──> SMTP ──> Sent APPEND ──> IMAP MOVE
 ```
 
 The service uses direct adapters rather than coupling domain state to a bot framework. SQLite runs in WAL mode and stores mail identity, exact RFC-derived thread keys, normalized attachment classification, AI results, Telegram message IDs, update offsets, mail-scoped conversations with exact ForceReply prompt IDs, outbound transactions, action locks, schema migrations, and durable jobs. Navigating a different card cannot clear another mail's draft or AI question.
@@ -33,6 +33,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - Pending items absent from Inbox on two consecutive reconciliations are treated as externally completed and their Telegram content is removed.
 - SQLite uses its online backup API; retention is applied inside `/data/backups` without copying a live WAL database file directly.
 - SMTP-success/Sent-copy-pending and Sent-copy-success/archive-pending are distinct states, so retries cannot duplicate the reply.
+- Calendar Accept/Tentative/Decline reuses the same durable outbound stages and atomic lock; the stored iTIP response fixes UID, Sequence, Organizer, attendee, and PARTSTAT across retries.
 - AI results are optional and can be regenerated after restart.
 - AI output passes through a provider-independent Persian style normalizer; therefore fallback-provider changes cannot reintroduce disallowed greetings or closings.
 - Reply output also passes through a gender-safety normalizer: it strips unverified gendered titles and applies only an optional exact email-address override.

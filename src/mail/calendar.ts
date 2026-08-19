@@ -13,6 +13,8 @@ export function parseCalendar(content: Buffer | string): CalendarEvent | undefin
   const method = value(lines, "METHOD");
   const uid = value(event, "UID");
   const status = value(event, "STATUS");
+  const sequence = value(event, "SEQUENCE");
+  const recurrenceId = value(event, "RECURRENCE-ID");
   const summary = value(event, "SUMMARY");
   const description = value(event, "DESCRIPTION");
   const location = value(event, "LOCATION");
@@ -26,6 +28,8 @@ export function parseCalendar(content: Buffer | string): CalendarEvent | undefin
     ...(method ? { method: method.toUpperCase() } : {}),
     ...(uid ? { uid } : {}),
     ...(status ? { status: status.toUpperCase() } : {}),
+    ...(sequence && Number.isFinite(Number(sequence)) ? { sequence: Number(sequence) } : {}),
+    ...(recurrenceId ? { recurrenceId } : {}),
     ...(summary ? { summary: decode(summary) } : {}),
     ...(description ? { description: decode(description) } : {}),
     ...(location ? { location: decode(location) } : {}),

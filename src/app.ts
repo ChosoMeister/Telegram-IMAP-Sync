@@ -6,6 +6,7 @@ import type { AiService } from "./ai.js";
 import { buildReply } from "./ai.js";
 import type { ImapService } from "./mail/imap.js";
 import type { SmtpService } from "./mail/smtp.js";
+import type { CalendarResponse } from "./mail/smtp.js";
 import type { TelegramApi, TelegramMessage, TelegramUpdate } from "./telegram/api.js";
 import { esc } from "./telegram/api.js";
 import { mailButtons, renderMail } from "./telegram/render.js";
@@ -297,7 +298,7 @@ export class MailBotApp {
   }
 
   private async handleCallback(callbackId: string, data: string): Promise<void> {
-    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|done|reply|replyall|forward|instruct|edit|formal|short|friendly|send|cancel)$/.exec(data);
+    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|edit|formal|short|friendly|send|cancel)$/.exec(data);
     if (!match) return;
     const requestedMailId = Number(match[1]);
     const requestedMail = this.store.getMail(requestedMailId);
@@ -327,6 +328,10 @@ export class MailBotApp {
     if (action === "ask") return this.chooseAiContext(mail);
     if (action === "askmail" || action === "askfiles" || action === "askthread") return this.startAiQuestion(mail, action === "askthread" ? "thread" : action === "askfiles" ? "attachments" : "mail");
     if (action === "done") return this.done(mail);
+    if (action?.startsWith("calaccept") || action?.startsWith("caltentative") || action?.startsWith("caldecline")) {
+      const response: CalendarResponse = action.startsWith("calaccept") ? "accept" : action.startsWith("caltentative") ? "tentative" : "decline";
+      return action.endsWith("confirm") ? this.sendCalendarResponse(mail, response) : this.confirmCalendarResponse(mail, response);
+    }
     if (action === "reply" || action === "replyall") return this.startReply(mail, action === "replyall");
     if (action === "forward") return this.startForward(mail);
     if (action === "instruct" || action === "edit") {
@@ -485,6 +490,73 @@ export class MailBotApp {
       await this.editPrimary(mail, `❌ انجام عملیات ناموفق بود؛ ایمیل در Inbox باقی ماند.\n${esc(message)}`, [[{ text: "🔄 تلاش مجدد", callback_data: `m:${mail.id}:done`, style: "primary" }]]);
     }
     });
+  }
+
+  private async sendCalendarResponse(mail: StoredMail, response: CalendarResponse): Promise<void> {
+    return this.withMailAction(mail, `calendar-${response}`, async () => {
+      if (this.config.APP_MODE !== "live") {
+        await this.telegram.sendMessage("🧪 حالت آزمایشی فعال است؛ پاسخ تقویم ارسال نشد.", undefined, true);
+        return;
+      }
+      if (!mail.calendar || mail.calendar.method !== "REQUEST") throw new Error("این پیام یک دعوت تقویم قابل پاسخ نیست");
+      const kind = `calendar_${response}` as const;
+      let outbound = this.store.getOutbound(mail.id);
+      if (!outbound) {
+        const messageId = this.outboundMessageId(mail.id);
+        const built = await this.smtp.buildCalendarResponse(mail, response, messageId);
+        outbound = this.store.createOutbound(mail.id, kind, messageId, built.raw);
+      }
+      if (outbound.kind !== kind) throw new Error("A different calendar response is already pending for this invitation");
+      let smtpAccepted = outbound.smtpAccepted;
+      let sentSaved = outbound.sentSaved;
+      const label = ({ accept: "قبول", tentative: "شاید", decline: "رد" } as const)[response];
+      try {
+        await this.editPrimary(mail, `⏳ در حال ثبت «${label}»، ذخیره در Sent و آرشیو دعوت…`, []);
+        if (!smtpAccepted) {
+          if (await this.imap.sentContainsMessageId(outbound.messageId)) {
+            smtpAccepted = true; sentSaved = true; this.store.markOutbound(mail.id, "sent");
+          } else {
+            if (outbound.smtpAttempted) throw new Error("Previous SMTP attempt has an unknown result; automatic resend was blocked to prevent a duplicate calendar response");
+            this.store.markOutbound(mail.id, "attempt");
+            await this.smtp.sendRaw([mail.calendar.organizer!.address], outbound.raw);
+            this.store.markOutbound(mail.id, "smtp"); smtpAccepted = true;
+          }
+        }
+        if (!sentSaved) {
+          await this.imap.appendSent(outbound.raw);
+          this.store.markOutbound(mail.id, "sent"); sentSaved = true;
+        }
+        const members = this.store.threadMembers(mail.id);
+        await this.imap.archiveMany(members);
+        await this.telegram.deleteMessages(mail.telegramMessageIds);
+        this.store.setTelegramMessages(mail.id, []);
+        this.store.setThreadState(mail.id, "done");
+        this.store.markOutbound(mail.id, "complete");
+        for (const member of members) this.store.clearConversation(this.config.TELEGRAM_USER_ID, member.id);
+        this.logger.info("Calendar response sent, saved, and invitation archived", { mailId: mail.id, response, messageCount: members.length });
+      } catch (error) {
+        const message = describeError(error);
+        this.store.setState(mail.id, "failed", message);
+        const retryStep = sentSaved ? "آرشیو" : smtpAccepted ? "ذخیره در Sent" : "ارسال پاسخ";
+        await this.editPrimary(mail, `❌ مرحله ${retryStep} ناموفق بود. دعوت در Inbox باقی ماند.\n${esc(message)}`, [[
+          { text: `🔄 تلاش مجدد برای ${label}`, callback_data: `m:${mail.id}:cal${response}`, style: "primary" }
+        ], [{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }]]);
+      }
+    });
+  }
+
+  private async confirmCalendarResponse(mail: StoredMail, response: CalendarResponse): Promise<void> {
+    if (!mail.calendar || mail.calendar.method !== "REQUEST") throw new Error("این پیام یک دعوت تقویم قابل پاسخ نیست");
+    const label = ({ accept: "قبول", tentative: "شاید", decline: "رد" } as const)[response];
+    await this.editPrimary(mail, [
+      `<b>تأیید پاسخ تقویم</b>`, "",
+      `<b>رویداد:</b> ${esc(mail.calendar.summary || mail.subject)}`,
+      `<b>انتخاب شما:</b> ${label}`,
+      "", "پس از تأیید، پاسخ برای برگزارکننده ارسال و دعوت از Inbox آرشیو می‌شود."
+    ].join("\n"), [[
+      { text: `✅ تأیید نهایی: ${label}`, callback_data: `m:${mail.id}:cal${response}confirm`, style: response === "decline" ? "danger" : "success" },
+      { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
+    ]]);
   }
 
   private async startReply(mail: StoredMail, replyAll: boolean): Promise<void> {

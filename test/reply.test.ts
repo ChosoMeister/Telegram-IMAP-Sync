@@ -50,4 +50,19 @@ describe("reply builder", () => {
     expect(parsed.text).toContain("Original body");
     expect(parsed.attachments.map((item) => item.filename)).toEqual(["invoice.pdf"]);
   });
+  it("builds an RFC 5546 calendar REPLY for the configured attendee", async () => {
+    const calendarMail = { ...mail, calendar: {
+      parserVersion: 1, method: "REQUEST", uid: "event-1@example.com", sequence: 4, summary: "جلسه پروژه",
+      organizer: { address: "organizer@example.com" }, attendees: [{ name: "Me", address: "me@example.com" }]
+    } };
+    const built = await new SmtpService(config).buildCalendarResponse(calendarMail, "tentative", "<calendar-reply@example.com>");
+    expect(built.organizer).toBe("organizer@example.com");
+    const parsed = await simpleParser(built.raw);
+    expect(parsed.to?.text).toContain("organizer@example.com");
+    const ics = parsed.attachments.find((item) => item.contentType === "text/calendar")?.content.toString("utf8") ?? built.raw.toString("utf8");
+    expect(ics).toContain("METHOD:REPLY");
+    expect(ics).toContain("UID:event-1@example.com");
+    expect(ics).toContain("SEQUENCE:4");
+    expect(ics).toContain("PARTSTAT=TENTATIVE:mailto:me@example.com");
+  });
 });

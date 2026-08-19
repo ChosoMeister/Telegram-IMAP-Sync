@@ -22,7 +22,7 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
     listInboxUids: vi.fn().mockResolvedValue(new Set([incoming.uid]))
   };
   const ai = { analyze: vi.fn().mockResolvedValue(undefined), ask: vi.fn().mockResolvedValue("پاسخ آزمایشی"), status: vi.fn().mockReturnValue({}) };
-  const smtp = { status: vi.fn().mockReturnValue({}), verify: vi.fn().mockResolvedValue(undefined), buildReply: vi.fn().mockResolvedValue(Buffer.from("raw")), sendRaw: vi.fn().mockResolvedValue(undefined) };
+  const smtp = { status: vi.fn().mockReturnValue({}), verify: vi.fn().mockResolvedValue(undefined), buildReply: vi.fn().mockResolvedValue(Buffer.from("raw")), buildCalendarResponse: vi.fn().mockResolvedValue({ raw: Buffer.from("calendar-raw"), organizer: "organizer@example.com" }), sendRaw: vi.fn().mockResolvedValue(undefined) };
   const app = new MailBotApp(isolatedConfig, store, imap as any, smtp as any, telegram as any, ai as any, new Logger("error"));
   return { app, store, telegram, imap, smtp, archive, id };
 }
@@ -85,6 +85,25 @@ describe("Done transaction", () => {
     await (s.app as any).handleCallback("expired", `m:${s.id}:done`);
     expect(s.archive).toHaveBeenCalledOnce();
     expect(s.store.getMail(s.id)?.state).toBe("done");
+    s.store.close();
+  });
+});
+
+describe("calendar response transaction", () => {
+  it("sends, saves, archives, and removes a calendar invitation only after success", async () => {
+    const s = setup();
+    (s.app as any).config.APP_MODE = "live";
+    s.store.upsertMail({ ...incoming, calendar: { parserVersion: 1, method: "REQUEST", uid: "event-1", organizer: { address: "organizer@example.com" }, attendees: [{ address: "me@example.com" }] } });
+    await (s.app as any).handleCallback("preview", `m:${s.id}:calaccept`);
+    expect(s.smtp.sendRaw).not.toHaveBeenCalled();
+    expect(s.telegram.editMessage).toHaveBeenCalledWith(100, expect.stringContaining("تأیید پاسخ تقویم"), expect.any(Array));
+    await (s.app as any).handleCallback("confirm", `m:${s.id}:calacceptconfirm`);
+    expect(s.smtp.buildCalendarResponse).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "accept", expect.any(String));
+    expect(s.smtp.sendRaw).toHaveBeenCalledWith(["organizer@example.com"], Buffer.from("calendar-raw"));
+    expect(s.imap.appendSent).toHaveBeenCalledWith(Buffer.from("calendar-raw"));
+    expect(s.archive).toHaveBeenCalledOnce();
+    expect(s.store.getMail(s.id)?.state).toBe("done");
+    expect(s.telegram.deleteMessages).toHaveBeenCalledWith([100, 101]);
     s.store.close();
   });
 });

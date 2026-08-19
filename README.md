@@ -13,6 +13,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
 - Persian priority, summary, suggested action, and deadline extraction
 - Deterministic `text/calendar` detection with structured Persian event cards for invitations, updates, and cancellations, independent of attachment filename
+- Exchange-compatible Accept/Tentative/Decline responses with durable SMTP, Sent-copy, Archive, and Telegram cleanup stages plus deterministic deadline-based calendar priority
 - Enforced Persian administrative style: `با درود و مهر` / `با سپاس`, with deterministic post-processing if a model ignores the policy
 - HTML-to-text handling with same-card pagination for the latest message or every merged Inbox message, plus Back navigation
 - On-demand real attachments with inline signature-image filtering
@@ -69,7 +70,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.5.0
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.6.0
 ```
 
 ## Windows installation (Docker Desktop)

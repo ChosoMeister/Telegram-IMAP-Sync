@@ -37,6 +37,11 @@ export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
     { text: "↩️ پاسخ", callback_data: `m:${id}:reply`, style: "primary" },
     { text: "✅ انجام شد", callback_data: `m:${id}:done`, style: "success" }
   ]];
+  if (mail.calendar?.method === "REQUEST" && mail.calendar.uid && mail.calendar.organizer?.address && mail.calendar.status !== "CANCELLED") rows.unshift([
+    { text: "✅ قبول", callback_data: `m:${id}:calaccept`, style: "success" },
+    { text: "❔ شاید", callback_data: `m:${id}:caltentative`, style: "primary" },
+    { text: "❌ رد", callback_data: `m:${id}:caldecline`, style: "danger" }
+  ]);
   const secondary: Button[] = [{ text: "↪️ فوروارد", callback_data: `m:${id}:forward` }];
   if (mail.cc.length || mail.to.length > 1) secondary.push({ text: "👥 پاسخ به همه", callback_data: `m:${id}:replyall` });
   rows.push(secondary);
@@ -65,10 +70,12 @@ function renderCalendarMail(mail: StoredMail, thread: StoredMail[]): string {
   const type = event.method === "CANCEL" || event.status === "CANCELLED" ? "لغو رویداد" : event.method === "REPLY" ? "پاسخ به دعوت" : "دعوت تقویم";
   const action = event.method === "CANCEL" || event.status === "CANCELLED" ? "بررسی لغو یا تغییر برنامه" : "بررسی زمان رویداد و پاسخ به دعوت";
   const attendeeLimit = 20;
+  const priority = calendarImportance(event);
   const attendeeLines = event.attendees.slice(0, attendeeLimit).map((attendee) => `• ${attendee.name || attendee.address}`);
   if (event.attendees.length > attendeeLimit) attendeeLines.push(`• و ${event.attendees.length - attendeeLimit} نفر دیگر`);
   return [
-    `📅 <b>${type}</b>`,
+    `${badge[priority.importance]} <b>${importanceFa(priority.importance)} — ${priority.score}/100</b>`,
+    `\n📅 <b>${type}</b>`,
     thread.length > 1 ? `\n<b>🧵 مکالمه:</b> ${thread.length} پیام در Inbox` : "",
     `\n<b>عنوان:</b> ${esc(event.summary || mail.subject)}`,
     `<b>برگزارکننده:</b> ${esc(organizer)}`,
@@ -80,6 +87,20 @@ function renderCalendarMail(mail: StoredMail, thread: StoredMail[]): string {
     event.description ? `\n<b>توضیحات رویداد:</b>\n${esc(event.description.slice(0, 1200))}` : mail.text ? `\n<b>متن همراه:</b>\n${esc(mail.text.slice(0, 1200))}` : "",
     `\n<b>اقدام پیشنهادی:</b>\n${action}`
   ].filter(Boolean).join("\n");
+}
+
+export function calendarImportance(event: NonNullable<StoredMail["calendar"]>, now = new Date()): { importance: keyof typeof badge; score: number } {
+  if (event.method === "CANCEL" || event.status === "CANCELLED") return { importance: "low", score: 20 };
+  const start = event.start?.iso ? new Date(event.start.iso).getTime() : undefined;
+  const end = event.end?.iso ? new Date(event.end.iso).getTime() : start;
+  if (end !== undefined && end < now.getTime()) return { importance: "low", score: 15 };
+  if (event.method !== "REQUEST") return { importance: "normal", score: 50 };
+  if (start === undefined) return { importance: "normal", score: 55 };
+  const hours = (start - now.getTime()) / 3_600_000;
+  if (hours <= 24) return { importance: "critical", score: 95 };
+  if (hours <= 72) return { importance: "high", score: 80 };
+  if (hours <= 168) return { importance: "normal", score: 60 };
+  return { importance: "normal", score: 50 };
 }
 
 function formatCalendarDate(value: NonNullable<NonNullable<StoredMail["calendar"]>["start"]>): string {

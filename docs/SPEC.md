@@ -35,6 +35,14 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 - `Ask AI` accepts a free-form question scoped to the current mail, extractable real attachments, or the discovered thread, and renders the answer on the same card.
 - The summary card itself is the pending thread view, so it has no redundant `Thread` button. `Ask AI > whole thread` still searches Inbox, configured/discovered Archive, and configured/discovered Sent only by exact Message-ID relationships.
 - A calendar message has a dedicated Persian card showing event type, title, organizer address, Tehran start/end, location or link, attendee count, description, and a deterministic action. Its ICS payload is not counted as a normal or hidden attachment. Invitations remain actionable until the user completes them.
+- Calendar priority is deterministic and cannot be overridden by AI: cancelled/past events are low; unanswered requests within 24 hours are critical, within 72 hours high, within seven days normal-high, and later requests normal.
+
+## Calendar response lifecycle
+
+1. A valid `METHOD:REQUEST` with UID, Organizer, and the configured sender in Attendees exposes `Accept`, `Tentative`, and `Decline`.
+2. The first click opens a same-card confirmation screen; only explicit final confirmation creates one durable RFC 5546 `METHOD:REPLY` with matching UID/Sequence and attendee `PARTSTAT`.
+3. The exact RFC822 payload is persisted before SMTP, sent only to Organizer, appended to Sent, and then all pending Inbox members are archived.
+4. The Telegram card is removed only after every stage succeeds. Failure leaves the invitation visible with a retry for the incomplete response; ambiguous SMTP results are never blindly resent.
 - All Telegram message IDs belonging to a mail are tracked for Done cleanup.
 - Every 36 hours, the full pending queue is silently refreshed oldest-to-newest. Each replacement card is sent and persisted before the previous card is deleted, avoiding a gap if Telegram delivery fails and preserving visual order.
 - If the bot is offline beyond Telegram's deletion window, old content may not be deletable; this is a platform limitation.

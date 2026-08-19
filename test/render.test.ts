@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mailButtons, renderMail } from "../src/telegram/render.js";
+import { calendarImportance, mailButtons, renderMail } from "../src/telegram/render.js";
 import type { StoredMail } from "../src/domain/types.js";
 import { incoming } from "./helpers.js";
 
@@ -34,7 +34,7 @@ describe("mail card buttons", () => {
 
   it("renders a structured calendar card without generic AI or attachment wording", () => {
     const mail: StoredMail = { ...stored(1), calendar: {
-      method: "REQUEST", summary: "جلسه پروژه", organizer: { name: "Organizer", address: "organizer@example.com" },
+      method: "REQUEST", uid: "event-1", summary: "جلسه پروژه", organizer: { name: "Organizer", address: "organizer@example.com" },
       attendees: [{ name: "Mustafa", address: "me@example.com" }, { address: "unnamed@example.com" }], start: { raw: "20260820T103000Z", iso: "2026-08-20T10:30:00.000Z", timeZone: "UTC" }
     }, attachments: [{ partId: "0", filename: "attachment-1", contentType: "text/calendar", size: 100, contentDisposition: "attachment", classification: "calendar", isRealAttachment: false }],
     analysis: { importance: "low", score: 30, summaryFa: "خلاصه اشتباه", suggestedAction: "اقدام اشتباه", reason: "کمبود متن", provider: "test" }
@@ -49,5 +49,13 @@ describe("mail card buttons", () => {
     expect(rendered).not.toContain("خلاصه اشتباه");
     expect(rendered).not.toContain("پیوست اصلی");
     expect(mailButtons(mail).flat().map((button) => button.text).join(" ")).not.toContain("موارد مخفی");
+    expect(mailButtons(mail).flat().map((button) => button.text)).toEqual(expect.arrayContaining(["✅ قبول", "❔ شاید", "❌ رد"]));
+  });
+
+  it("scores calendar urgency deterministically from response need and start time", () => {
+    const now = new Date("2026-08-19T10:00:00.000Z");
+    expect(calendarImportance({ method: "REQUEST", attendees: [], start: { raw: "", iso: "2026-08-20T09:00:00.000Z" } }, now)).toEqual({ importance: "critical", score: 95 });
+    expect(calendarImportance({ method: "REQUEST", attendees: [], start: { raw: "", iso: "2026-08-21T10:00:00.000Z" } }, now)).toEqual({ importance: "high", score: 80 });
+    expect(calendarImportance({ method: "CANCEL", attendees: [] }, now)).toEqual({ importance: "low", score: 20 });
   });
 });

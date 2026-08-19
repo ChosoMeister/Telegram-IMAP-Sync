@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 - 2026-08-19
+
+- Add real RFC 5546 Accept, Tentative, and Decline responses addressed to the event Organizer.
+- Require same-card final confirmation before any calendar response leaves the system.
+- Preserve UID, Sequence, recurrence identity, attendee identity, and PARTSTAT in the iTIP reply.
+- Reuse durable SMTP, Sent APPEND, Archive, atomic-lock, and duplicate-prevention stages; invitations stay Pending until completion.
+- Score calendar importance deterministically from cancellation/past state, response requirement, and proximity to the event instead of generic AI analysis.
+
 ## 0.5.0 - 2026-08-19
 
 - Detect calendar messages deterministically from `text/calendar` even when Exchange names the part `attachment-1`.

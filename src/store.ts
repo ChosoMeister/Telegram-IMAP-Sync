@@ -19,7 +19,7 @@ interface MailRow {
 
 export interface OutboundOperation {
   mailId: number;
-  kind: "reply" | "forward";
+  kind: "reply" | "forward" | "calendar_accept" | "calendar_tentative" | "calendar_decline";
   messageId: string;
   raw: Buffer;
   smtpAttempted: boolean;
@@ -221,7 +221,7 @@ export class Store {
     return Number(result.changes);
   }
 
-  createOutbound(mailId: number, kind: "reply" | "forward", messageId: string, raw: Buffer): OutboundOperation {
+  createOutbound(mailId: number, kind: OutboundOperation["kind"], messageId: string, raw: Buffer): OutboundOperation {
     this.db.prepare("INSERT OR IGNORE INTO outbound_operations(mail_id,kind,message_id,raw_blob) VALUES(?,?,?,?)")
       .run(mailId, kind, messageId, raw);
     return this.getOutbound(mailId)!;
