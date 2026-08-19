@@ -25,7 +25,7 @@ Every account, including the first, uses the same file copied from `config/mail-
 
 | Variable | Required/default | Purpose |
 |---|---|---|
-| `IMAP_HOST` | required per account file | Exchange IMAP hostname reachable from the container. |
+| `IMAP_HOST` | required per account file | IMAP hostname reachable from the container, such as an Exchange host or `imap.gmail.com`. |
 | `IMAP_PORT` | `993` | IMAP port. |
 | `IMAP_SECURE` | `true` | TLS from connection start. |
 | `IMAP_USER`, `IMAP_PASSWORD` | required | IMAP credentials. |
@@ -41,6 +41,31 @@ Every account, including the first, uses the same file copied from `config/mail-
 | `SMTP_SECURE` | `false` | `false` normally upgrades with STARTTLS; use `true` for implicit TLS. |
 | `SMTP_USER`, `SMTP_PASSWORD` | required | SMTP credentials. |
 | `SMTP_FROM` | required | Valid envelope/header sender address. |
+
+### Gmail and Google Workspace account
+
+Gmail is supported as another independent account in the combined All Inbox. It uses the same generic account file and requires a Google App Password rather than the normal account password. A common configuration is:
+
+```dotenv
+ACCOUNT_ID=gmail
+ACCOUNT_LABEL=Gmail
+IMAP_HOST=imap.gmail.com
+IMAP_PORT=993
+IMAP_SECURE=true
+IMAP_USER=your-address@gmail.com
+IMAP_PASSWORD=your-16-character-app-password
+IMAP_MAILBOX=INBOX
+IMAP_ARCHIVE_MAILBOX=[Gmail]/All Mail
+IMAP_SENT_MAILBOX=[Gmail]/Sent Mail
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=your-address@gmail.com
+SMTP_PASSWORD=your-16-character-app-password
+SMTP_FROM=your-address@gmail.com
+```
+
+Port `587` with `SMTP_SECURE=false` is the STARTTLS alternative. Folder names above are common Gmail defaults, not assumptions the service should make; run discovery against the real account before live mode. See [Gmail / Google Workspace setup](GMAIL.md) for prerequisites, activation, testing, and troubleshooting.
 
 ## Telegram
 

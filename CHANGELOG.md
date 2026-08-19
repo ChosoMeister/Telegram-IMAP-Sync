@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Document Gmail and Google Workspace as supported independent accounts using IMAP/SMTP, Google App Passwords, discovered folder paths, and the existing account-scoped All Inbox routing.
+
 ## 0.9.0 - 2026-08-19
 
 - Move the primary mailbox out of global `.env` into the same ignored per-account format as every additional account.

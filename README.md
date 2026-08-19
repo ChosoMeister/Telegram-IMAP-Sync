@@ -1,8 +1,8 @@
 # Telegram IMAP Sync
 
-A self-hosted, single-user action inbox that mirrors an Exchange Inbox to Telegram. It supports local/organizational AI analysis, full-text retrieval, on-demand attachments, safe Done/archive, AI-assisted Reply/Reply All, and transactional Exchange calendar RSVP.
+A self-hosted, single-user action inbox that mirrors independent IMAP mailboxes—including Exchange, Gmail, and Google Workspace—to Telegram. It supports local/organizational AI analysis, full-text retrieval, on-demand attachments, safe Done/archive, AI-assisted Reply/Reply All, and transactional Exchange calendar RSVP.
 
-The project is currently safe to configure and test, but defaults to `APP_MODE=dry-run`. Do not enable live actions until the Exchange folder discovery checklist has been completed.
+The project is currently safe to configure and test, but defaults to `APP_MODE=dry-run`. Do not enable live actions until the mailbox discovery checklist has been completed for every account.
 
 ## What is implemented
 
@@ -29,6 +29,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Gender-neutral AI addressing by default, with optional verified per-address Persian honorifics
 - Optional local owner profile so AI recognizes the user across their names and email addresses and renders self-assigned work as a direct `Your action`
 - Multi-server All Inbox through one Telegram bot, with every reply, forward, RSVP, Sent copy, and Archive action routed through the receiving account
+- Gmail and Google Workspace accounts through IMAP/SMTP with an App Password and account-scoped Reply, Sent, and Archive routing
 - Ordered fallback across multiple models on the same organizational AI proxy
 - Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
@@ -49,6 +50,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - [Mail rules](docs/MAIL_RULES.md) — optional local routing before Telegram delivery
 - [Product specification](docs/SPEC.md) and [architecture](docs/ARCHITECTURE.md)
 - [Multi-account / All Inbox design](docs/MULTI_ACCOUNT_DESIGN.md) — account-scoped IMAP/SMTP architecture and rollout
+- [Gmail / Google Workspace setup](docs/GMAIL.md) — App Password, folders, SMTP modes, discovery, and commissioning
 - [Release and documentation checklist](docs/MAINTENANCE.md)
 - [راهنمای فارسی](README.fa.md)
 
@@ -118,12 +120,12 @@ The JSON response also reports the last successful reconciliation, last Telegram
 
 1. Keep `APP_MODE=dry-run`.
 2. Validate IMAP/SMTP TLS and credentials without printing them.
-3. Discover live Exchange mailbox paths and choose the exact archive destination.
-   Confirm the actual Outlook sent-mail folder as well; Exchange commonly uses `Sent Items`, while a separate `Sent` folder may also exist.
+3. Discover live mailbox paths and choose the exact archive and Sent destinations for every account.
+   Exchange commonly uses `Sent Items`; Gmail commonly exposes `[Gmail]/All Mail` and `[Gmail]/Sent Mail`, but discovery is authoritative.
 4. Start the service and verify read-only import with a single test email.
 5. Confirm Telegram user authorization, HTML extraction, AI fallback, and attachment filtering.
-6. Test SMTP reply to a controlled recipient and confirm the matching copy in the configured sent mailbox and Outlook threading.
-7. Test archive with one non-critical message and verify it in Outlook.
+6. Test SMTP reply to a controlled recipient and confirm the matching copy in the configured Sent mailbox and provider threading.
+7. Test archive with one non-critical message and verify it in the provider's mail client.
 8. Back up the SQLite volume, then set `APP_MODE=live`.
 
 For a bounded dry-run, set `TEST_IMPORT_LIMIT=1`, `2`, or `3`. Set it back to `0` before production deployment; a nonzero value intentionally watches only the newest messages.

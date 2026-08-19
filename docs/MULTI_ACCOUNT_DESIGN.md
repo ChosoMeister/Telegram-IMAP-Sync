@@ -28,9 +28,9 @@ Add an immutable `account_id` to mail, outbound transaction, job, and related ac
 
 Callbacks continue to carry the local mail row ID; the row resolves the account before any network operation. No request may fall back to a global SMTP or IMAP client. Health and `/status` report every account separately plus an aggregate state.
 
-## Configuration direction
+## Account registry
 
-A future ignored `config/accounts.json` will hold an array of account IDs, display labels, IMAP/SMTP endpoints, users, sender addresses, and folder paths. Environment-variable secret references or a separate ignored secret file should be supported so passwords do not enter Git. The existing singleton environment variables remain a backward-compatible primary account during migration.
+Each mailbox uses one ignored `config/account-<id>.env` copied from `config/mail-account.example.env`. The ordered `MAIL_ACCOUNT_FILES` list is the registry and its first entry is primary. This format applies equally to Exchange, Gmail, Google Workspace, and other compatible IMAP/SMTP servers. Global `.env` contains application settings only; the deprecated singleton variables are read solely when `MAIL_ACCOUNT_FILES` is empty.
 
 ## Safe delivery sequence
 
@@ -50,6 +50,6 @@ A future ignored `config/accounts.json` will hold an array of account IDs, displ
 
 ## Implemented behavior
 
-Version 0.9.0 uses one uniform file per account. `MAIL_ACCOUNT_FILES` lists Orchid, Axon, and future accounts in order; the first entry is primary. No mailbox host, username, password, sender, or folder remains in global `.env`. Existing rows keep their immutable account ID while Telegram IDs and pending state remain unchanged.
+Version 0.9.0 uses one uniform file per account. `MAIL_ACCOUNT_FILES` lists current and future accounts in order; the first entry is primary. No mailbox host, username, password, sender, or folder remains in global `.env`. Existing rows keep their immutable account ID while Telegram IDs and pending state remain unchanged. Gmail-specific commissioning is documented in [GMAIL.md](GMAIL.md).
 
 Mail rules currently run only for the primary account. This is deliberate: organization-specific folders and routing must not be copied to another server without explicit per-account rules.

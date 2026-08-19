@@ -2,7 +2,7 @@
 
 ## Goal
 
-Keep the user's Exchange Inbox as an actionable queue mirrored in a private Telegram bot. A Telegram item remains pending until the user completes it or sends a reply. Completion moves the source message out of Exchange Inbox and removes all related Telegram content.
+Keep the user's independent IMAP Inboxes—including Exchange and Gmail—as one actionable queue mirrored in a private Telegram bot. A Telegram item remains pending until the user completes it or sends a reply. Completion moves the source message out of its Inbox and removes all related Telegram content.
 
 ## Invariants
 
@@ -25,6 +25,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 17. Calendar identity comes from MIME `text/calendar`, never from an attachment filename or AI inference; its structured fields take precedence over generic analysis in the card.
 18. When an owner profile is configured, AI treats its names and addresses as the bot user's identity, labels the action owner, and addresses self-assigned actions directly as `شما` rather than naming the user in third person.
 19. Every mail belongs to one immutable account; all reads, replies, forwards, calendar responses, Sent copies, and Archive moves use that account. IMAP identities and threads never collide across accounts.
+20. Provider-specific folder paths and authentication remain account configuration; Gmail uses App Password authentication and discovered Gmail folder paths without changing account routing semantics.
 
 ## Telegram lifecycle
 
@@ -59,7 +60,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
    The initial draft and subsequent AI rewrites include the discovered thread context.
 4. The final screen includes recipients and body.
 5. Approval sends via SMTP with `In-Reply-To` and `References`.
-6. After SMTP success, the state becomes `sent_pending_sentcopy` before the exact RFC822 message is appended to Exchange Sent.
+6. After SMTP success, the state becomes `sent_pending_sentcopy` before the exact RFC822 message is appended to the receiving account's configured Sent mailbox.
 7. After Sent storage succeeds, the state becomes `sent_pending_archive` before the source message is moved from Inbox.
 8. A failure offers retry for only the incomplete stage; SMTP is never repeated after acceptance.
 9. Archive success completes the item and removes its Telegram card without adding a separate success message.
@@ -87,7 +88,7 @@ Background analysis is a durable SQLite job. A crash releases an expired lease f
 
 Classification uses MIME disposition, CID references, HTML usage, content type, filename patterns, byte size, and image dimensions; a SHA-256 fingerprint is retained for audit and future recurrence learning. Non-image files are real attachments. CID-referenced images are hidden even when a sender incorrectly labels them as ordinary attachments. Common signature/logo/icon names and small icon/signature geometry are also hidden. Explicit normal-sized image attachments remain real. Hidden items are never silently discarded: the user can inspect them, and returning to the summary removes only their temporary Telegram copies.
 
-## Exchange discovery gate
+## Mailbox discovery gate
 
 Before live mode:
 
@@ -96,7 +97,7 @@ Before live mode:
 3. List exact mailbox paths and special-use flags.
 4. Select the existing Archive/Processed destination or create one only after user approval.
 5. Test with one non-critical message.
-6. Confirm the message leaves Inbox, remains searchable, and appears correctly in Outlook.
-7. Verify SMTP Sent Items behavior and thread headers.
+6. Confirm the message leaves Inbox, remains searchable, and appears correctly in the provider's mail client.
+7. Verify SMTP Sent behavior and thread headers.
 
 Only then set `APP_MODE=live`.
