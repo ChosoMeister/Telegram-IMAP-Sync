@@ -1,6 +1,6 @@
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
-import type { AppConfig } from "../config.js";
+import type { MailAccountAppConfig } from "../config.js";
 import type { IncomingMail, MailAttachment, StoredMail } from "../domain/types.js";
 import type { Logger } from "../logger.js";
 import type { MailRule } from "../rules.js";
@@ -11,7 +11,7 @@ import { normalizeMessageId } from "./thread.js";
 export class ImapService {
   private client?: ImapFlow;
   private stopped = false;
-  constructor(private config: AppConfig, private logger: Logger, private accountId = "primary", private accountLabel = "Primary") {}
+  constructor(private config: MailAccountAppConfig, private logger: Logger, private accountId = "primary", private accountLabel = "Primary") {}
 
   private createClient(): ImapFlow {
     return new ImapFlow({

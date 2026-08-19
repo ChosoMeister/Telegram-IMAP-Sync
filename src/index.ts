@@ -18,8 +18,9 @@ async function main(): Promise<void> {
   const config = loadConfig();
   const logger = new Logger(config.LOG_LEVEL);
   await mkdir(dirname(config.DATABASE_PATH), { recursive: true });
-  const store = new Store(config.DATABASE_PATH, config.PRIMARY_ACCOUNT_ID, config.PRIMARY_ACCOUNT_LABEL);
   const accountConfigs = await loadMailAccountConfigs(config);
+  const primaryConfig = accountConfigs[0]!;
+  const store = new Store(config.DATABASE_PATH, primaryConfig.id, primaryConfig.label);
   const runtimes = accountConfigs.map((account) => ({ ...account, imap: new ImapService(account.config, logger, account.id, account.label), smtp: new SmtpService(account.config) }));
   const primary = runtimes[0]!;
   const imap = primary.imap;
@@ -27,7 +28,7 @@ async function main(): Promise<void> {
   const telegram = new TelegramApi(config);
   const ai = new AiService(config, logger, await loadHonorifics(config.HONORIFICS_PATH), await loadUserProfile(config.USER_PROFILE_PATH));
   const rules = await MailRuleService.load(config.MAIL_RULES_PATH);
-  const app = new MailBotApp(config, store, imap, smtp, telegram, ai, logger, rules, runtimes.slice(1));
+  const app = new MailBotApp(primary.config, store, imap, smtp, telegram, ai, logger, rules, runtimes.slice(1));
 
   const runBackup = async () => {
     try {

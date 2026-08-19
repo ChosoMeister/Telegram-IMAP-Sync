@@ -13,16 +13,14 @@ const schema = z.object({
   MAIL_RULES_PATH: z.string().optional(),
   HONORIFICS_PATH: z.string().optional(),
   USER_PROFILE_PATH: z.string().optional(),
-  PRIMARY_ACCOUNT_ID: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/).default("primary"),
-  PRIMARY_ACCOUNT_LABEL: z.string().min(1).default("Primary"),
   MAIL_ACCOUNT_FILES: z.string().optional(),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
 
-  IMAP_HOST: z.string().min(1),
+  IMAP_HOST: z.string().min(1).optional(),
   IMAP_PORT: z.coerce.number().int().default(993),
   IMAP_SECURE: bool.default(true),
-  IMAP_USER: z.string().min(1),
-  IMAP_PASSWORD: z.string().min(1),
+  IMAP_USER: z.string().min(1).optional(),
+  IMAP_PASSWORD: z.string().min(1).optional(),
   IMAP_MAILBOX: z.string().default("INBOX"),
   IMAP_ARCHIVE_MAILBOX: z.string().optional(),
   IMAP_SENT_MAILBOX: z.string().optional(),
@@ -31,12 +29,12 @@ const schema = z.object({
   THREAD_MAX_MESSAGES: z.coerce.number().int().min(2).max(100).default(30),
   MAX_ATTACHMENT_BYTES: z.coerce.number().int().min(1_000_000).default(25_000_000),
 
-  SMTP_HOST: z.string().min(1),
+  SMTP_HOST: z.string().min(1).optional(),
   SMTP_PORT: z.coerce.number().int().default(587),
   SMTP_SECURE: bool.default(false),
-  SMTP_USER: z.string().min(1),
-  SMTP_PASSWORD: z.string().min(1),
-  SMTP_FROM: z.string().email(),
+  SMTP_USER: z.string().min(1).optional(),
+  SMTP_PASSWORD: z.string().min(1).optional(),
+  SMTP_FROM: z.string().email().optional(),
 
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   TELEGRAM_USER_ID: z.coerce.number().int(),
@@ -57,6 +55,8 @@ const schema = z.object({
 });
 
 export type AppConfig = z.infer<typeof schema> & { aiProviderOrder: string[]; aiProxyModelOrder: string[] };
+type RequiredMailKey = "IMAP_HOST" | "IMAP_USER" | "IMAP_PASSWORD" | "SMTP_HOST" | "SMTP_USER" | "SMTP_PASSWORD" | "SMTP_FROM";
+export type MailAccountAppConfig = Omit<AppConfig, RequiredMailKey> & { [K in RequiredMailKey]-?: Exclude<AppConfig[K], undefined> } & { mailAccountId: string; mailAccountLabel: string };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = schema.parse(env);

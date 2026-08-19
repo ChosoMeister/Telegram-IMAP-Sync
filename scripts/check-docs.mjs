@@ -2,7 +2,7 @@ import { readFile, access } from "node:fs/promises";
 import { stdout } from "node:process";
 
 const requiredDocs = [
-  "README.md", "README.fa.md", "CHANGELOG.md", ".env.example",
+  "README.md", "README.fa.md", "CHANGELOG.md", ".env.example", "config/mail-account.example.env",
   "docs/CONFIGURATION.md", "docs/OPERATIONS.md", "docs/MAIL_RULES.md",
   "docs/SPEC.md", "docs/ARCHITECTURE.md", "docs/MAINTENANCE.md",
   "docs/MULTI_ACCOUNT_DESIGN.md"
@@ -18,11 +18,13 @@ if (!changelog.includes(`## ${pkg.version} `)) throw new Error(`CHANGELOG.md has
 
 const configSource = await readFile("src/config.ts", "utf8");
 const envExample = await readFile(".env.example", "utf8");
+const accountExample = await readFile("config/mail-account.example.env", "utf8");
 const configDoc = await readFile("docs/CONFIGURATION.md", "utf8");
 const schemaKeys = [...configSource.matchAll(/^ {2}([A-Z][A-Z0-9_]+):/gm)].map((match) => match[1]);
 const envKeys = [...envExample.matchAll(/^([A-Z][A-Z0-9_]+)=/gm)].map((match) => match[1]);
+const accountKeys = [...accountExample.matchAll(/^([A-Z][A-Z0-9_]+)=/gm)].map((match) => match[1]);
 
-const missingFromExample = schemaKeys.filter((key) => !envKeys.includes(key));
+const missingFromExample = schemaKeys.filter((key) => !envKeys.includes(key) && !accountKeys.includes(key));
 const unknownInExample = envKeys.filter((key) => !schemaKeys.includes(key));
 const missingFromDocs = schemaKeys.filter((key) => !configDoc.includes(`\`${key}\``));
 const errors = [];

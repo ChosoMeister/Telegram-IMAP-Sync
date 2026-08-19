@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
-import type { AppConfig } from "./config.js";
+import type { AppConfig, MailAccountAppConfig } from "./config.js";
 import type { ImapService } from "./mail/imap.js";
 import type { SmtpService } from "./mail/smtp.js";
 
@@ -15,7 +15,7 @@ const accountSchema = z.object({
   SMTP_USER: z.string().min(1), SMTP_PASSWORD: z.string().min(1), SMTP_FROM: z.string().email()
 });
 
-export interface MailAccountConfig { id: string; label: string; config: AppConfig }
+export interface MailAccountConfig { id: string; label: string; config: MailAccountAppConfig }
 export interface MailAccountRuntime extends MailAccountConfig { imap: ImapService; smtp: SmtpService }
 
 function parseEnv(contents: string): Record<string, string> {
@@ -34,23 +34,29 @@ function parseEnv(contents: string): Record<string, string> {
 }
 
 export async function loadMailAccountConfigs(config: AppConfig): Promise<MailAccountConfig[]> {
-  const accounts: MailAccountConfig[] = [{ id: config.PRIMARY_ACCOUNT_ID, label: config.PRIMARY_ACCOUNT_LABEL, config }];
   const paths = (config.MAIL_ACCOUNT_FILES ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  const accounts: MailAccountConfig[] = [];
+  if (!paths.length) {
+    const legacy = accountSchema.parse({ ACCOUNT_ID: "primary", ACCOUNT_LABEL: "Primary", ...config });
+    accounts.push({ id: legacy.ACCOUNT_ID, label: legacy.ACCOUNT_LABEL, config: mergeAccount(config, legacy) });
+  }
   for (const path of paths) {
     const parsed = accountSchema.parse(parseEnv(await readFile(path, "utf8")));
-    accounts.push({
-      id: parsed.ACCOUNT_ID, label: parsed.ACCOUNT_LABEL,
-      config: {
-        ...config,
-        IMAP_HOST: parsed.IMAP_HOST, IMAP_PORT: parsed.IMAP_PORT, IMAP_SECURE: parsed.IMAP_SECURE,
-        IMAP_USER: parsed.IMAP_USER, IMAP_PASSWORD: parsed.IMAP_PASSWORD, IMAP_MAILBOX: parsed.IMAP_MAILBOX,
-        IMAP_ARCHIVE_MAILBOX: parsed.IMAP_ARCHIVE_MAILBOX, IMAP_SENT_MAILBOX: parsed.IMAP_SENT_MAILBOX,
-        SMTP_HOST: parsed.SMTP_HOST, SMTP_PORT: parsed.SMTP_PORT, SMTP_SECURE: parsed.SMTP_SECURE,
-        SMTP_USER: parsed.SMTP_USER, SMTP_PASSWORD: parsed.SMTP_PASSWORD, SMTP_FROM: parsed.SMTP_FROM
-      }
-    });
+    accounts.push({ id: parsed.ACCOUNT_ID, label: parsed.ACCOUNT_LABEL, config: mergeAccount(config, parsed) });
   }
   const ids = accounts.map((account) => account.id);
   if (new Set(ids).size !== ids.length) throw new Error("Mail account IDs must be unique");
   return accounts;
+}
+
+function mergeAccount(config: AppConfig, parsed: z.infer<typeof accountSchema>): MailAccountAppConfig {
+  return {
+    ...config,
+    mailAccountId: parsed.ACCOUNT_ID, mailAccountLabel: parsed.ACCOUNT_LABEL,
+    IMAP_HOST: parsed.IMAP_HOST, IMAP_PORT: parsed.IMAP_PORT, IMAP_SECURE: parsed.IMAP_SECURE,
+    IMAP_USER: parsed.IMAP_USER, IMAP_PASSWORD: parsed.IMAP_PASSWORD, IMAP_MAILBOX: parsed.IMAP_MAILBOX,
+    IMAP_ARCHIVE_MAILBOX: parsed.IMAP_ARCHIVE_MAILBOX, IMAP_SENT_MAILBOX: parsed.IMAP_SENT_MAILBOX,
+    SMTP_HOST: parsed.SMTP_HOST, SMTP_PORT: parsed.SMTP_PORT, SMTP_SECURE: parsed.SMTP_SECURE,
+    SMTP_USER: parsed.SMTP_USER, SMTP_PASSWORD: parsed.SMTP_PASSWORD, SMTP_FROM: parsed.SMTP_FROM
+  };
 }

@@ -1,4 +1,4 @@
-import type { AppConfig } from "./config.js";
+import type { MailAccountAppConfig } from "./config.js";
 import type { StoredMail } from "./domain/types.js";
 import type { Logger } from "./logger.js";
 import type { Store } from "./store.js";
@@ -26,14 +26,16 @@ export class MailBotApp {
   private lastTelegramPoll?: Date;
   private readonly inboxCount = new Map<string, number>();
   private readonly accounts: MailAccountRuntime[];
+  private readonly primaryAccountId: string;
   private jobWorkerRunning = false;
   private cardsVerified = false;
   constructor(
-    private config: AppConfig, private store: Store, private imap: ImapService,
+    private config: MailAccountAppConfig, private store: Store, private imap: ImapService,
     private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger,
     private rules?: MailRuleService, additionalAccounts: MailAccountRuntime[] = []
   ) {
-    this.accounts = [{ id: config.PRIMARY_ACCOUNT_ID, label: config.PRIMARY_ACCOUNT_LABEL, config, imap, smtp }, ...additionalAccounts];
+    this.accounts = [{ id: config.mailAccountId, label: config.mailAccountLabel, config, imap, smtp }, ...additionalAccounts];
+    this.primaryAccountId = this.accounts[0]!.id;
   }
 
   async start(): Promise<void> {
@@ -83,7 +85,7 @@ export class MailBotApp {
 
   private async connectAccount(account: MailAccountRuntime): Promise<void> {
     await account.imap.connect();
-    if (account.id === this.config.PRIMARY_ACCOUNT_ID) await account.imap.ensureMailboxes(this.rules?.destinations() ?? []);
+    if (account.id === this.primaryAccountId) await account.imap.ensureMailboxes(this.rules?.destinations() ?? []);
   }
 
   private async superviseImap(account: MailAccountRuntime): Promise<void> {
@@ -136,7 +138,7 @@ export class MailBotApp {
       const knownUids = this.store.listKnownUids(account.id, mailbox.path, mailbox.uidValidity);
       for (const incoming of await account.imap.scanInbox(knownUids)) {
         const result = this.store.upsertMail(incoming);
-        const rule = account.id === this.config.PRIMARY_ACCOUNT_ID ? this.rules?.match(incoming) : undefined;
+        const rule = account.id === this.primaryAccountId ? this.rules?.match(incoming) : undefined;
         const ruleAppliedKey = rule ? `mail-rule:${result.id}:${rule.name}` : undefined;
         if (rule && (!rule.actions.copyTo || this.store.getKv(ruleAppliedKey!) !== "applied")) {
           const mail = this.store.getMail(result.id)!;
@@ -888,7 +890,7 @@ export class MailBotApp {
   }
 
   private accountFor(mail: StoredMail): MailAccountRuntime {
-    const accountId = mail.accountId ?? this.config.PRIMARY_ACCOUNT_ID;
+    const accountId = mail.accountId ?? this.primaryAccountId;
     const account = this.accounts.find((candidate) => candidate.id === accountId);
     if (!account) throw new Error(`Mail account is unavailable: ${accountId}`);
     return account;

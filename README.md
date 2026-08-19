@@ -56,9 +56,10 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 
 ```sh
 cp .env.example .env
+cp config/mail-account.example.env config/account-orchid.env
 ```
 
-Fill `.env` locally. Never commit real passwords, bot tokens, or AI keys.
+Fill global settings in `.env` and IMAP/SMTP settings in one ignored `config/account-<id>.env` per account. List the files in `MAIL_ACCOUNT_FILES`. Never commit credentials.
 
 For Docker Desktop, `host.docker.internal` reaches Ollama on the host. Compose also supplies the compatible host mapping on Linux.
 
@@ -75,7 +76,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.8.1
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.9.0
 ```
 
 ## Windows installation (Docker Desktop)

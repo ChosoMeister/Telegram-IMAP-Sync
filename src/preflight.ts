@@ -5,11 +5,14 @@ import { AiService } from "./ai.js";
 import type { StoredMail } from "./domain/types.js";
 import { loadHonorifics } from "./honorifics.js";
 import { loadUserProfile } from "./user-profile.js";
+import { loadMailAccountConfigs } from "./accounts.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
   if (config.APP_MODE !== "dry-run") throw new Error("Preflight must run with APP_MODE=dry-run");
   const telegram = new TelegramApi(config);
+  const accounts = await loadMailAccountConfigs(config);
+  const primary = accounts[0]!;
   const [botResult, chatResult, webhookResult] = await Promise.allSettled([telegram.getMe(), telegram.getChat(), telegram.getWebhookInfo()]);
 
   let ai: Record<string, unknown> = { enabled: config.AI_ENABLED, ok: false };
@@ -17,7 +20,7 @@ async function main(): Promise<void> {
     const sample: StoredMail = {
       id: 0, uid: 0, uidValidity: "preflight", mailbox: "INBOX", state: "pending", telegramMessageIds: [],
       messageId: "<preflight@example.invalid>", references: [], subject: "درخواست بررسی تا فردا",
-      from: [{ address: "sender@example.invalid" }], to: [{ address: config.SMTP_FROM }], cc: [], replyTo: [],
+      from: [{ address: "sender@example.invalid" }], to: [{ address: primary.config.SMTP_FROM }], cc: [], replyTo: [],
       receivedAt: new Date(), text: "این یک پیام ساختگی برای تست اتصال مدل است. لطفاً اهمیت آن را تحلیل کن.", attachments: []
     };
     const analysis = await new AiService(config, new Logger(config.LOG_LEVEL), await loadHonorifics(config.HONORIFICS_PATH), await loadUserProfile(config.USER_PROFILE_PATH)).analyze(sample);
@@ -31,7 +34,7 @@ async function main(): Promise<void> {
       chat: chatResult.status === "fulfilled" ? { ok: true, chatIdMatches: chatResult.value.id === config.TELEGRAM_USER_ID, chatType: chatResult.value.type } : { ok: false, error: String(chatResult.reason) },
       webhook: webhookResult.status === "fulfilled" ? { ok: true, configured: Boolean(webhookResult.value.url), pendingUpdates: webhookResult.value.pending_update_count } : { ok: false, error: String(webhookResult.reason) }
     },
-    ai
+    accounts: accounts.map((account) => ({ id: account.id, label: account.label })), ai
   }, null, 2)}\n`);
 }
 

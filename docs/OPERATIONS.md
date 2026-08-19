@@ -20,7 +20,7 @@ In PowerShell, use `Copy-Item .env.example .env`. Keep Docker Desktop in Linux-c
 
 GHCR publishes `latest`, the package version, and immutable `sha-<commit>` tags for Linux `amd64` and `arm64`. Pulling is useful for inspection or custom deployment; the repository Compose file intentionally builds the checked-out source so code and configuration stay auditable.
 
-Version 0.8.0 adds the account-scope migration. Back up SQLite first and keep `PRIMARY_ACCOUNT_ID` stable: existing rows, Telegram IDs, thread keys, and pending state migrate to that account. Additional account files are activated only through `MAIL_ACCOUNT_FILES`. Version 0.6.0 adds transactional calendar RSVP; version 0.5.0 adds structured calendar refetch; version 0.4.0 adds thread and ForceReply migrations.
+Version 0.9.0 moves every account, including the primary, to an ignored account file. Keep the first `MAIL_ACCOUNT_FILES` entry stable (`account-orchid.env` on the current deployment); this preserves existing rows, Telegram IDs, thread keys, and pending state. Back up `.env`, every account file, and SQLite before changing order. Version 0.8.0 added account-scoped storage; earlier migrations remain automatic.
 
 For a new additional account, validate its folders and SMTP in a one-off dry-run before adding its file to `MAIL_ACCOUNT_FILES`. After activation, confirm the health JSON contains a connected entry for every account. A disconnected account makes aggregate readiness `503` but does not stop reconciliation and actions for connected accounts. Never run multiple containers with the same Telegram bot token.
 

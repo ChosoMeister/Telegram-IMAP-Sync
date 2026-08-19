@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.0 - 2026-08-19
+
+- Move the primary mailbox out of global `.env` into the same ignored per-account format as every additional account.
+- Make ordered `MAIL_ACCOUNT_FILES` the uniform registry; the first file is primary and future accounts require only one new file/list entry.
+- Keep a deprecated singleton `.env` compatibility path while removing mailbox credentials from the production/global example.
+- Update discovery, preflight, documentation validation, and operations guidance for the symmetric layout.
+
 ## 0.8.1 - 2026-08-19
 
 - Add ordered fallback across multiple models exposed by one OpenAI-compatible AI proxy.

@@ -31,6 +31,7 @@
 
 ```sh
 cp .env.example .env
+cp config/mail-account.example.env config/account-orchid.env
 docker compose config --quiet
 docker compose build --pull
 docker compose up -d
@@ -39,7 +40,7 @@ docker compose logs -f --tail 100
 
 در PowerShell به‌جای دستور اول از `Copy-Item .env.example .env` استفاده کنید. ابتدا `APP_MODE=dry-run` و `TEST_IMPORT_LIMIT=1` بماند. با `npm run discover` نام دقیق Archive و Sent را پیدا و با `npm run preflight` اتصال‌ها را بررسی کنید. بعد از تست یک ایمیل کنترل‌شده، `APP_MODE=live` و برای تولید `TEST_IMPORT_LIMIT=0` قرار دهید.
 
-هیچ‌وقت `.env`، توکن Telegram، رمز ایمیل، کلید AI یا قواعد واقعی سازمان را commit نکنید. `docker compose down` داده را نگه می‌دارد؛ از `--volumes` در عملیات عادی استفاده نکنید.
+`.env` فقط تنظیمات عمومی است و هر حساب فایل مستقل `config/account-<id>.env` دارد. هیچ‌وقت این فایل‌ها، توکن Telegram، رمز ایمیل، کلید AI یا قواعد واقعی سازمان را commit نکنید. `docker compose down` داده را نگه می‌دارد؛ از `--volumes` استفاده نکنید.
 
 ## مستندات
 
@@ -50,4 +51,4 @@ docker compose logs -f --tail 100
 - [طرح چندحسابی و All Inbox](docs/MULTI_ACCOUNT_DESIGN.md)
 - [چک‌لیست نگهداری مستندات و انتشار](docs/MAINTENANCE.md)
 
-وضعیت سرویس روی `http://127.0.0.1:18080/` است و هنگام قطع IMAP هر حساب یا توقف موفق Poll تلگرام برای بیش از دو دقیقه کد `503` می‌دهد. پاسخ health اتصال، Inbox، Sync و SMTP هر حساب را جداگانه و وضعیت Telegram، AI، backup و صف را یکجا نشان می‌دهد. دستور `/status` نیز خلاصه هر حساب را نمایش می‌دهد. تصویرهای `amd64` و `arm64` با tagهای `latest`، نسخه `0.8.1` و commit در `ghcr.io/chosomeister/telegram-imap-sync` منتشر می‌شوند.
+وضعیت سرویس روی `http://127.0.0.1:18080/` است و هنگام قطع IMAP هر حساب یا توقف موفق Poll تلگرام برای بیش از دو دقیقه کد `503` می‌دهد. پاسخ health اتصال، Inbox، Sync و SMTP هر حساب را جداگانه و وضعیت Telegram، AI، backup و صف را یکجا نشان می‌دهد. دستور `/status` نیز خلاصه هر حساب را نمایش می‌دهد. تصویرهای `amd64` و `arm64` با tagهای `latest`، نسخه `0.9.0` و commit در `ghcr.io/chosomeister/telegram-imap-sync` منتشر می‌شوند.

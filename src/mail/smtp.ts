@@ -1,7 +1,7 @@
 import nodemailer from "nodemailer";
 import MailComposer from "nodemailer/lib/mail-composer/index.js";
 import { simpleParser } from "mailparser";
-import type { AppConfig } from "../config.js";
+import type { MailAccountAppConfig } from "../config.js";
 import type { ReplyDraft, StoredMail } from "../domain/types.js";
 
 export type CalendarResponse = "accept" | "tentative" | "decline";
@@ -9,7 +9,7 @@ export type CalendarResponse = "accept" | "tentative" | "decline";
 export class SmtpService {
   private transporter;
   private health: { ok?: boolean; lastSuccess?: string; lastError?: string } = {};
-  constructor(private config: AppConfig) {
+  constructor(private config: MailAccountAppConfig) {
     this.transporter = nodemailer.createTransport({
       host: config.SMTP_HOST, port: config.SMTP_PORT, secure: config.SMTP_SECURE,
       auth: { user: config.SMTP_USER, pass: config.SMTP_PASSWORD }
