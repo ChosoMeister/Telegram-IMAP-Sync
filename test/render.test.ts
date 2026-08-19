@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mailButtons } from "../src/telegram/render.js";
+import { mailButtons, renderMail } from "../src/telegram/render.js";
 import type { StoredMail } from "../src/domain/types.js";
 import { incoming } from "./helpers.js";
 
@@ -30,5 +30,20 @@ describe("mail card buttons", () => {
     expect(labels).toContain("👥 پاسخ به همه");
     expect(labels).toContain("📎 پیوست‌ها (1)");
     expect(labels).toContain("🖼 موارد مخفی (1)");
+  });
+
+  it("renders a structured calendar card without generic AI or attachment wording", () => {
+    const mail: StoredMail = { ...stored(1), calendar: {
+      method: "REQUEST", summary: "جلسه پروژه", organizer: { name: "Organizer", address: "organizer@example.com" },
+      attendees: [{ address: "me@example.com" }], start: { raw: "20260820T103000Z", iso: "2026-08-20T10:30:00.000Z", timeZone: "UTC" }
+    }, attachments: [{ partId: "0", filename: "attachment-1", contentType: "text/calendar", size: 100, contentDisposition: "attachment", classification: "calendar", isRealAttachment: false }],
+    analysis: { importance: "low", score: 30, summaryFa: "خلاصه اشتباه", suggestedAction: "اقدام اشتباه", reason: "کمبود متن", provider: "test" }
+    };
+    const rendered = renderMail(mail);
+    expect(rendered).toContain("دعوت تقویم");
+    expect(rendered).toContain("جلسه پروژه");
+    expect(rendered).not.toContain("خلاصه اشتباه");
+    expect(rendered).not.toContain("پیوست اصلی");
+    expect(mailButtons(mail).flat().map((button) => button.text).join(" ")).not.toContain("موارد مخفی");
   });
 });

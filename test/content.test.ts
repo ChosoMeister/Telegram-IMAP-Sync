@@ -34,4 +34,22 @@ describe("mail content", () => {
     ]);
     expect(mail.attachments.every((item) => item.sha256?.length === 64)).toBe(true);
   });
+  it("detects and structures a calendar payload independently of its filename", () => {
+    const ics = [
+      "BEGIN:VCALENDAR", "METHOD:REQUEST", "BEGIN:VEVENT", "UID:event-1@example.com",
+      "SUMMARY:ذخیره سازی مدارک ویدیویی بیمار", "DTSTART;TZID=Iran Standard Time:20260820T103000",
+      "DTEND;TZID=Iran Standard Time:20260820T110000", "LOCATION:جلسه آنلاین",
+      "ORGANIZER;CN=Marjan Hosseini:mailto:marjan@example.com", "ATTENDEE;CN=Mustafa:mailto:mustafa@example.com",
+      "DESCRIPTION:درخواست کننده\\: فاطمه", "END:VEVENT", "END:VCALENDAR"
+    ].join("\r\n");
+    const mail = parsedMailToIncoming({
+      subject: "Calendar", text: "درخواست کننده: فاطمه", attachments: [
+        { filename: undefined, contentType: "text/calendar", contentDisposition: "attachment", size: ics.length, content: Buffer.from(ics) }
+      ]
+    } as any, { uid: 1, uidValidity: "1", mailbox: "INBOX" });
+    expect(mail.calendar).toMatchObject({ method: "REQUEST", summary: "ذخیره سازی مدارک ویدیویی بیمار", location: "جلسه آنلاین", organizer: { address: "marjan@example.com" } });
+    expect(mail.calendar?.attendees).toHaveLength(1);
+    expect(mail.calendar?.start?.iso).toBeTruthy();
+    expect(mail.attachments[0]).toMatchObject({ filename: "attachment-1", classification: "calendar", isRealAttachment: false });
+  });
 });

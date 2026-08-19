@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 - 2026-08-19
+
+- Detect calendar messages deterministically from `text/calendar` even when Exchange names the part `attachment-1`.
+- Parse ICS method, status, title, description, organizer, attendees, start/end, location, URL, and common Exchange/IANA time zones.
+- Render dedicated Persian invitation/update/cancellation cards and bypass misleading generic AI summaries for calendar mail.
+- Exclude ICS payloads from normal and hidden attachment counts while retaining their structured data for AI context.
+- Refetch legacy pending calendar messages once so existing Telegram cards are corrected in place.
+
 ## 0.4.1 - 2026-08-19
 
 - Add same-card, paginated `All message texts` with chronological sender, address, time, subject, and body sections.

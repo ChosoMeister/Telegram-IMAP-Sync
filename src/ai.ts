@@ -193,8 +193,8 @@ export class AiService {
     throw new Error("No AI provider could answer the question");
   }
 
-  private context(mail: Pick<StoredMail, "subject" | "from" | "to" | "cc" | "receivedAt" | "text">): string {
-    return JSON.stringify({ subject: mail.subject, from: mail.from, to: mail.to, cc: mail.cc, receivedAt: mail.receivedAt, body: mail.text });
+  private context(mail: Pick<StoredMail, "subject" | "from" | "to" | "cc" | "receivedAt" | "text"> & { calendar?: StoredMail["calendar"] }): string {
+    return JSON.stringify({ subject: mail.subject, from: mail.from, to: mail.to, cc: mail.cc, receivedAt: mail.receivedAt, body: mail.text, ...(mail.calendar ? { calendar: mail.calendar } : {}) });
   }
 }
 

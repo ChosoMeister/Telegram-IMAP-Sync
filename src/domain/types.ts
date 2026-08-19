@@ -13,12 +13,26 @@ export interface MailAttachment {
   size: number;
   contentDisposition: "attachment" | "inline";
   contentId?: string;
-  classification?: "real" | "inline" | "signature" | "uncertain";
+  classification?: "real" | "inline" | "signature" | "uncertain" | "calendar";
   classificationReason?: string;
   sha256?: string;
   width?: number;
   height?: number;
   isRealAttachment: boolean;
+}
+
+export interface CalendarEvent {
+  method?: string;
+  uid?: string;
+  status?: string;
+  summary?: string;
+  description?: string;
+  location?: string;
+  organizer?: Address;
+  attendees: Address[];
+  start?: { iso?: string; raw: string; timeZone?: string };
+  end?: { iso?: string; raw: string; timeZone?: string };
+  url?: string;
 }
 
 export interface IncomingMail {
@@ -37,6 +51,7 @@ export interface IncomingMail {
   text: string;
   html?: string;
   attachments: MailAttachment[];
+  calendar?: CalendarEvent;
 }
 
 export interface Analysis {

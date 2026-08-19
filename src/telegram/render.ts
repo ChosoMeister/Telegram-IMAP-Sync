@@ -4,10 +4,11 @@ import { esc } from "./api.js";
 const badge = { critical: "🔴", high: "🟠", normal: "🟡", low: "🟢" } as const;
 
 export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): string {
+  if (mail.calendar) return renderCalendarMail(mail, thread);
   const a = mail.analysis;
   const from = mail.from.map((item) => item.name ? `${item.name} <${item.address}>` : item.address).join(", ") || "نامشخص";
   const real = thread.flatMap((item) => item.attachments.filter((attachment) => attachment.isRealAttachment));
-  const hidden = thread.flatMap((item) => item.attachments.filter((attachment) => !attachment.isRealAttachment));
+  const hidden = thread.flatMap((item) => item.attachments.filter((attachment) => !attachment.isRealAttachment && attachment.classification !== "calendar"));
   const timeline = thread.length > 1 ? thread.map((item, index) => {
     const sender = item.from[0]?.name ?? item.from[0]?.address ?? "نامشخص";
     const direction = item.mailbox === mail.mailbox ? "📥" : "📤";
@@ -50,10 +51,37 @@ export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
   }
 
   const realCount = thread.reduce((count, item) => count + item.attachments.filter((attachment) => attachment.isRealAttachment).length, 0);
-  const hiddenCount = thread.reduce((count, item) => count + item.attachments.filter((attachment) => !attachment.isRealAttachment).length, 0);
+  const hiddenCount = thread.reduce((count, item) => count + item.attachments.filter((attachment) => !attachment.isRealAttachment && attachment.classification !== "calendar").length, 0);
   if (realCount) rows.push([{ text: `📎 پیوست‌ها (${realCount})`, callback_data: `m:${id}:files` }]);
   if (hiddenCount) rows.push([{ text: `🖼 موارد مخفی (${hiddenCount})`, callback_data: `m:${id}:hidden` }]);
   return rows;
+}
+
+function renderCalendarMail(mail: StoredMail, thread: StoredMail[]): string {
+  const event = mail.calendar!;
+  const organizer = event.organizer
+    ? event.organizer.name ? `${event.organizer.name} <${event.organizer.address}>` : event.organizer.address
+    : mail.from.map((item) => item.name ? `${item.name} <${item.address}>` : item.address).join(", ") || "نامشخص";
+  const type = event.method === "CANCEL" || event.status === "CANCELLED" ? "لغو رویداد" : event.method === "REPLY" ? "پاسخ به دعوت" : "دعوت تقویم";
+  const action = event.method === "CANCEL" || event.status === "CANCELLED" ? "بررسی لغو یا تغییر برنامه" : "بررسی زمان رویداد و پاسخ به دعوت";
+  return [
+    `📅 <b>${type}</b>`,
+    thread.length > 1 ? `\n<b>🧵 مکالمه:</b> ${thread.length} پیام در Inbox` : "",
+    `\n<b>عنوان:</b> ${esc(event.summary || mail.subject)}`,
+    `<b>برگزارکننده:</b> ${esc(organizer)}`,
+    event.start ? `<b>شروع:</b> ${esc(formatCalendarDate(event.start))}` : "",
+    event.end ? `<b>پایان:</b> ${esc(formatCalendarDate(event.end))}` : "",
+    event.location ? `<b>محل/جلسه:</b> ${esc(event.location)}` : "",
+    event.url ? `<b>پیوند:</b> ${esc(event.url)}` : "",
+    event.attendees.length ? `<b>شرکت‌کنندگان:</b> ${event.attendees.length} نفر` : "",
+    event.description ? `\n<b>توضیحات رویداد:</b>\n${esc(event.description.slice(0, 1200))}` : mail.text ? `\n<b>متن همراه:</b>\n${esc(mail.text.slice(0, 1200))}` : "",
+    `\n<b>اقدام پیشنهادی:</b>\n${action}`
+  ].filter(Boolean).join("\n");
+}
+
+function formatCalendarDate(value: NonNullable<NonNullable<StoredMail["calendar"]>["start"]>): string {
+  if (!value.iso) return `${value.raw}${value.timeZone ? ` (${value.timeZone})` : ""}`;
+  return new Intl.DateTimeFormat("fa-IR", { dateStyle: "full", timeStyle: "short", timeZone: "Asia/Tehran" }).format(new Date(value.iso));
 }
 
 function importanceFa(value: keyof typeof badge): string {

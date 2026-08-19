@@ -2,6 +2,7 @@ import sanitizeHtml from "sanitize-html";
 import { createHash } from "node:crypto";
 import type { Attachment, ParsedMail } from "mailparser";
 import type { Address, IncomingMail, MailAttachment } from "../domain/types.js";
+import { parseCalendar } from "./calendar.js";
 
 const quoteMarkers = [/^On .+wrote:$/im, /^From:\s.+$/im, /^-{2,}\s*Original Message\s*-{2,}$/im];
 
@@ -53,6 +54,11 @@ function attachmentMeta(attachment: Attachment, index: number, html?: string): M
   const disposition = attachment.contentDisposition === "inline" ? "inline" : "attachment";
   const referenced = Boolean(attachment.cid && html && new RegExp(`cid:${escapeRegex(attachment.cid)}`, "i").test(html));
   const filename = attachment.filename || `attachment-${index + 1}`;
+  if (attachment.contentType.toLowerCase() === "text/calendar") return {
+    partId: String(index), filename, contentType: attachment.contentType, size: attachment.size,
+    contentDisposition: disposition, classification: "calendar", classificationReason: "structured calendar payload",
+    sha256: createHash("sha256").update(attachment.content).digest("hex"), isRealAttachment: false
+  };
   const image = attachment.contentType.toLowerCase().startsWith("image/");
   const dimensions = imageDimensions(attachment.content, attachment.contentType);
   const classification = classifyAttachment({ filename, image, disposition, referenced, size: attachment.size, ...dimensions });
@@ -115,6 +121,7 @@ export function parsedMailToIncoming(parsed: ParsedMail, identity: Pick<Incoming
   const html = typeof parsed.html === "string" ? parsed.html : undefined;
   const rawText = parsed.text?.trim() || (html ? htmlToReadableText(html) : "");
   const references = Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [];
+  const calendar = parsed.attachments.map((attachment) => attachment.contentType.toLowerCase() === "text/calendar" ? parseCalendar(attachment.content) : undefined).find(Boolean);
   return {
     ...identity,
     ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
@@ -128,6 +135,7 @@ export function parsedMailToIncoming(parsed: ParsedMail, identity: Pick<Incoming
     receivedAt: parsed.date ?? new Date(),
     text: stripQuotedHistory(rawText),
     ...(html ? { html } : {}),
-    attachments: parsed.attachments.map((a, i) => attachmentMeta(a, i, html))
+    attachments: parsed.attachments.map((a, i) => attachmentMeta(a, i, html)),
+    ...(calendar ? { calendar } : {})
   };
 }

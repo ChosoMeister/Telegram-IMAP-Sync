@@ -413,7 +413,7 @@ export class MailBotApp {
       { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
     ]]);
     const members = this.store.threadMembers(mail.id);
-    const hidden = members.flatMap((member) => member.attachments.filter((attachment) => !attachment.isRealAttachment).map((attachment) => ({ member, attachment })));
+    const hidden = members.flatMap((member) => member.attachments.filter((attachment) => !attachment.isRealAttachment && attachment.classification !== "calendar").map((attachment) => ({ member, attachment })));
     const ids = [...mail.telegramMessageIds];
     for (const { member, attachment } of hidden) {
       const content = await this.imap.fetchAttachment(member, attachment);

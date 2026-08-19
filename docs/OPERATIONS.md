@@ -20,7 +20,7 @@ In PowerShell, use `Copy-Item .env.example .env`. Keep Docker Desktop in Linux-c
 
 GHCR publishes `latest`, the package version, and immutable `sha-<commit>` tags for Linux `amd64` and `arm64`. Pulling is useful for inspection or custom deployment; the repository Compose file intentionally builds the checked-out source so code and configuration stay auditable.
 
-Version 0.4.0 adds thread and ForceReply migrations automatically on first start. Existing exact RFC-related pending items are consolidated into the newest representative card; missing/stale cards are recreated silently. Existing Inbox messages that contain pre-0.3 attachment metadata are refetched once, reclassified, and edited in place.
+Version 0.5.0 also refetches existing Inbox messages containing `text/calendar` when structured event metadata is absent, then edits their cards in place. Version 0.4.0 adds thread and ForceReply migrations automatically on first start. Existing exact RFC-related pending items are consolidated into the newest representative card; missing/stale cards are recreated silently. Existing Inbox messages that contain pre-0.3 attachment metadata are refetched once and reclassified.
 
 ## Commission safely
 
@@ -90,6 +90,7 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Telegram and Inbox counts differ:** one Telegram card now represents one exact pending thread, so fewer cards than Inbox messages is expected. `/status` and health expose `pendingThreads` and `pending` separately. External moves are confirmed twice before cleanup; ensure `TEST_IMPORT_LIMIT=0`.
 - **Old Telegram card cannot be deleted:** Telegram limits deletion of old messages. Rotation reduces this risk, but prolonged bot downtime can exceed that window.
 - **Signature images still appear as attachments:** inspect `classificationReason` through the hidden-image review, retain a sanitized MIME sample, and add a regression fixture. Do not globally hide all small images because screenshots may be legitimate attachments.
+- **Calendar shown as a generic attachment:** confirm the MIME part is actually `text/calendar`. Version 0.5.0 ignores filenames such as `invite.ics` or `attachment-1`, refetches legacy Inbox payloads once, and renders structured ICS data. Remove any local mail rule that auto-moves all calendar messages if invitations should stay actionable in Telegram.
 - **A real image was hidden:** use `Review hidden images`; the file remains retrievable and is not forwarded by default. Classification changes require refetching that Inbox message or receiving a new copy.
 - **Thread has unrelated messages:** version 0.4.0 never merges by subject. Retain sanitized `Message-ID`, `In-Reply-To`, and `References` headers for diagnosis; malformed or reused sender IDs cannot be repaired safely by subject guessing.
 - **Wrong خانم/آقای in an AI draft:** unknown recipients must be neutral. For a verified person only, copy `config/honorifics.example.json` to ignored `config/honorifics.json`, use the lowercase email as key, and restart. Never commit the real directory.

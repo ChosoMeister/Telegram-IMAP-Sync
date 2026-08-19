@@ -1,7 +1,7 @@
 # Architecture
 
 ```text
-Exchange IMAP ──> reconciliation/IDLE ──> MIME + attachment classification ──> local mail rules ──> SQLite
+Exchange IMAP ──> reconciliation/IDLE ──> MIME + attachment/calendar classification ──> local mail rules ──> SQLite
                                                                │
                                   AI providers <────────────────┤
                                                                │
@@ -38,6 +38,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - Reply output also passes through a gender-safety normalizer: it strips unverified gendered titles and applies only an optional exact email-address override.
 - AI analysis jobs are leased from SQLite; abandoned leases return to the queue and repeated provider failures are bounded.
 - Legacy Inbox payloads missing attachment classification are refetched once and their existing Telegram cards are edited in place.
+- Legacy Inbox calendar payloads without structured event metadata are refetched once; ICS fields are parsed deterministically and the existing card is edited without waiting for AI.
 - Thread lookup temporarily opens Inbox/Archive/Sent mailboxes and restores the configured Inbox before normal reconciliation resumes.
 - Completed local rows expire according to `DATA_RETENTION_DAYS`; mailbox content is not deleted by this cleanup.
 
