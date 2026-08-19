@@ -27,7 +27,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 
 - Initial import scans all messages currently in Inbox, oldest first.
 - A new item contains sender, subject, time, AI summary/priority, suggested action, and real attachment count. A later Inbox reply in the same exact RFC thread replaces/recreates the representative card at the bottom and displays the pending messages as chronological sections.
-- `Latest message` shows the representative message body. `All message texts` sections every merged pending Inbox body chronologically with sender address, time, and subject. Both paginate by editing the same Telegram card, with `Back` restoring the summary.
+- A single-message card exposes only `Message text`. A merged card exposes `Latest message` plus `All message texts`, which sections every pending Inbox body chronologically with sender address, time, and subject. Both paginate by editing the same Telegram card, with `Back` restoring the summary.
 - `Attachments` retrieves real attachments from IMAP and sends them into the chat.
 - `Hidden images` retrieves signature/inline/uncertain images only on demand; Back removes those temporary Telegram messages.
 - `Ask AI` accepts a free-form question scoped to the current mail, extractable real attachments, or the discovered thread, and renders the answer on the same card.

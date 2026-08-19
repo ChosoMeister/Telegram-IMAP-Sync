@@ -4,6 +4,7 @@
 
 - Add same-card, paginated `All message texts` with chronological sender, address, time, subject, and body sections.
 - Keep a separate `Latest message` action and remove the redundant `Thread` button from every summary card.
+- Show `All message texts` only for genuinely merged threads; single-message cards expose only `Message text`.
 - Preserve old `Thread` callbacks as a safe compatibility alias for `All message texts` while existing cards are refreshed.
 
 ## 0.4.0 - 2026-08-19
