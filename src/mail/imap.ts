@@ -5,6 +5,7 @@ import type { IncomingMail, MailAttachment, StoredMail } from "../domain/types.j
 import type { Logger } from "../logger.js";
 import type { MailRule } from "../rules.js";
 import { parsedMailToIncoming } from "./content.js";
+import { describeError } from "../errors.js";
 
 export class ImapService {
   private client?: ImapFlow;
@@ -35,7 +36,7 @@ export class ImapService {
     if (this.client?.usable) return;
     if (this.client) await this.client.logout().catch(() => undefined);
     this.client = this.createClient();
-    this.client.on("error", (error) => this.logger.error("IMAP error", { error: error.message }));
+    this.client.on("error", (error) => this.logger.warn("IMAP transport interrupted", { error: describeError(error) }));
     await this.client.connect();
     await this.client.mailboxOpen(this.config.IMAP_MAILBOX);
   }

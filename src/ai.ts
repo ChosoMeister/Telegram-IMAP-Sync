@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Analysis, ReplyDraft, StoredMail } from "./domain/types.js";
 import type { AppConfig } from "./config.js";
 import type { Logger } from "./logger.js";
+import { describeError } from "./errors.js";
 
 const analysisSchema = z.object({
   importance: z.enum(["critical", "high", "normal", "low"]),
@@ -93,7 +94,7 @@ export class AiService {
 
   private success(provider: Provider): void { this.health.set(provider.name, { ok: true, lastSuccess: new Date().toISOString() }); }
   private failure(provider: Provider, error: unknown): void {
-    this.health.set(provider.name, { ok: false, lastError: error instanceof Error ? error.message : String(error) });
+    this.health.set(provider.name, { ok: false, lastError: describeError(error) });
   }
 
   async analyze(mail: StoredMail | Omit<StoredMail, "analysis">): Promise<Analysis | undefined> {
@@ -111,7 +112,7 @@ export class AiService {
         };
       } catch (error) {
         this.failure(provider, error);
-        this.logger.warn("AI provider failed", { provider: provider.name, error: error instanceof Error ? error.message : String(error) });
+        this.logger.warn("AI provider failed", { provider: provider.name, error: describeError(error) });
       }
     }
     return undefined;
@@ -128,7 +129,7 @@ export class AiService {
         if (typeof result.text === "string" && result.text.trim()) return normalizePersianStyle(result.text);
       } catch (error) {
         this.failure(provider, error);
-        this.logger.warn("AI reply provider failed", { provider: provider.name, error: error instanceof Error ? error.message : String(error) });
+        this.logger.warn("AI reply provider failed", { provider: provider.name, error: describeError(error) });
       }
     }
     throw new Error("No AI provider could draft a reply");
@@ -144,7 +145,7 @@ export class AiService {
         if (typeof result.text === "string" && result.text.trim()) return normalizePersianStyle(result.text);
       } catch (error) {
         this.failure(provider, error);
-        this.logger.warn("AI forward provider failed", { provider: provider.name, error: error instanceof Error ? error.message : String(error) });
+        this.logger.warn("AI forward provider failed", { provider: provider.name, error: describeError(error) });
       }
     }
     throw new Error("No AI provider could draft a forwarding note");
@@ -168,7 +169,7 @@ export class AiService {
         return normalizePersianStyle(result.text);
       } catch (error) {
         this.failure(provider, error);
-        this.logger.warn("AI question provider failed", { provider: provider.name, error: error instanceof Error ? error.message : String(error) });
+        this.logger.warn("AI question provider failed", { provider: provider.name, error: describeError(error) });
       }
     }
     throw new Error("No AI provider could answer the question");

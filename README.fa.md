@@ -40,4 +40,4 @@ docker compose logs -f --tail 100
 - [مشخصات محصول](docs/SPEC.md) و [معماری](docs/ARCHITECTURE.md)
 - [چک‌لیست نگهداری مستندات و انتشار](docs/MAINTENANCE.md)
 
-وضعیت سرویس روی `http://127.0.0.1:18080/` است و هنگام قطع IMAP کد `503` می‌دهد. پاسخ health وضعیت IMAP، Telegram، SMTP، AI، backup و صف کارها را نشان می‌دهد. دستور `/status` داخل ربات نیز خلاصه وضعیت را نمایش می‌دهد. تصویرهای `amd64` و `arm64` با tagهای `latest`، نسخه `0.3.1` و commit در `ghcr.io/chosomeister/telegram-imap-sync` منتشر می‌شوند؛ Compose مخزن عمداً سورس checkoutشده را build می‌کند.
+وضعیت سرویس روی `http://127.0.0.1:18080/` است و هنگام قطع IMAP کد `503` می‌دهد. پاسخ health وضعیت IMAP، Telegram، SMTP، AI، backup و صف کارها را نشان می‌دهد. دستور `/status` داخل ربات نیز خلاصه وضعیت را نمایش می‌دهد. تصویرهای `amd64` و `arm64` با tagهای `latest`، نسخه `0.3.2` و commit در `ghcr.io/chosomeister/telegram-imap-sync` منتشر می‌شوند؛ Compose مخزن عمداً سورس checkoutشده را build می‌کند. عملیات طولانی روی همان کارت وضعیت پیشرفت نشان می‌دهند و کلیک‌های تکراری بدون افزودن پیام جدید مهار می‌شوند.

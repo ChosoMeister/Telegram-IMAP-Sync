@@ -39,7 +39,7 @@ const schema = z.object({
   TELEGRAM_INITIAL_IMPORT_SILENT: bool.default(false),
 
   AI_PROVIDER_ORDER: z.string().default("ollama,proxy"),
-  AI_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
+  AI_TIMEOUT_MS: z.coerce.number().int().min(1000).default(15000),
   AI_CONTEXT_MAX_CHARS: z.coerce.number().int().min(4_000).default(60_000),
   AI_ATTACHMENT_MAX_BYTES: z.coerce.number().int().min(100_000).default(10_000_000),
   OLLAMA_BASE_URL: z.string().url().default("http://host.docker.internal:11434"),

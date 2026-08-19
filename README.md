@@ -24,9 +24,9 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
-- Atomic per-mail action locks, versioned SQLite migrations, and a durable AI analysis queue
+- Atomic per-mail action locks with duplicate-click cooldown, same-card progress, versioned SQLite migrations, and a durable AI analysis queue
 - Stable pre-send Message-ID and durable outbound RFC822 recovery state
-- Automatic IMAP reconnect with exponential backoff
+- Automatic IMAP reconnect with exponential backoff and disconnect-aware reconciliation
 - Telegram rate-limit/transient-failure backoff without unsafe message-send retries
 - SQLite recovery state, IMAP-aware health endpoint, structured redacted logs
 - Online SQLite backups with configurable retention
@@ -65,7 +65,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.3.1
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.3.2
 ```
 
 ## Windows installation (Docker Desktop)

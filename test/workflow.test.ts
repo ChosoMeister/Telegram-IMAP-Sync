@@ -139,6 +139,15 @@ describe("pending queue rotation", () => {
 });
 
 describe("incremental reconciliation recovery", () => {
+  it("defers reconciliation quietly while IMAP is disconnected", async () => {
+    const s = setup();
+    s.imap.isConnected.mockReturnValue(false);
+    await s.app.syncInbox(false);
+    expect(s.imap.scanInbox).not.toHaveBeenCalled();
+    expect(s.imap.listInboxUids).not.toHaveBeenCalled();
+    s.store.close();
+  });
+
   it("republishes a persisted pending mail whose Telegram delivery was interrupted", async () => {
     const s = setup();
     s.store.setTelegramMessages(s.id, []);
@@ -163,6 +172,19 @@ describe("incremental reconciliation recovery", () => {
 });
 
 describe("single-card navigation", () => {
+  it("suppresses a queued duplicate attachment action without adding chat messages", async () => {
+    const s = setup();
+    const mail = s.store.getMail(s.id)!;
+    mail.attachments = [{ id: "a", filename: "invoice.pdf", contentType: "application/pdf", size: 3, disposition: "attachment", isRealAttachment: true }];
+    s.imap.fetchAttachment.mockResolvedValue(Buffer.from("pdf"));
+    s.telegram.sendDocument.mockResolvedValue({ message_id: 201, chat: { id: 42 } });
+    await (s.app as any).showFiles(mail);
+    await (s.app as any).showFiles(mail);
+    expect(s.telegram.sendDocument).toHaveBeenCalledOnce();
+    expect(s.telegram.sendMessage).not.toHaveBeenCalled();
+    s.store.close();
+  });
+
   it("renders full body by editing the primary message instead of sending a new one", async () => {
     const s = setup();
     await (s.app as any).showBody(s.store.getMail(s.id), 0);

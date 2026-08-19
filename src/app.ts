@@ -13,6 +13,7 @@ import { splitTelegramText } from "./mail/content.js";
 import { canExtractAttachment, extractAttachmentText } from "./mail/extract.js";
 import type { MailRuleService } from "./rules.js";
 import { randomUUID } from "node:crypto";
+import { describeError } from "./errors.js";
 
 export class MailBotApp {
   private syncRunning = false;
@@ -94,7 +95,10 @@ export class MailBotApp {
   }
 
   async syncInbox(silent: boolean): Promise<void> {
-    if (this.syncRunning) return;
+    if (this.syncRunning || !this.imap.isConnected()) {
+      if (!this.syncRunning) this.logger.debug("Inbox reconciliation deferred until IMAP reconnects");
+      return;
+    }
     this.syncRunning = true;
     try {
       const newMail: StoredMail[] = [];
@@ -143,7 +147,9 @@ export class MailBotApp {
       void this.processJobs();
       this.lastSuccessfulSync = new Date();
     } catch (error) {
-      this.logger.error("Inbox reconciliation failed", { error: error instanceof Error ? error.message : String(error) });
+      const fields = { error: describeError(error) };
+      if (this.imap.isConnected()) this.logger.error("Inbox reconciliation failed", fields);
+      else this.logger.warn("Inbox reconciliation interrupted by IMAP disconnect; reconnect will retry it", fields);
     } finally { this.syncRunning = false; }
   }
 
@@ -335,6 +341,10 @@ export class MailBotApp {
   }
 
   private async showFiles(mail: StoredMail): Promise<void> {
+    return this.withMailAction(mail, "files", async () => {
+    await this.editPrimary(mail, "📎 در حال دریافت و ارسال پیوست‌های اصلی…", [[
+      { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
+    ]]);
     const ids = [...mail.telegramMessageIds];
     for (const attachment of mail.attachments.filter((a) => a.isRealAttachment)) {
       const content = await this.imap.fetchAttachment(mail, attachment);
@@ -345,9 +355,14 @@ export class MailBotApp {
     await this.editPrimary(this.store.getMail(mail.id)!, "📎 فایل‌ها در همین چت ارسال شدند. پس از بازگشت، فایل‌های موقت تلگرام پاک می‌شوند.", [[
       { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
     ]]);
+    }, 3_000);
   }
 
   private async showHiddenFiles(mail: StoredMail): Promise<void> {
+    return this.withMailAction(mail, "hidden-files", async () => {
+    await this.editPrimary(mail, "🖼 در حال دریافت تصاویر مخفی‌شده…", [[
+      { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
+    ]]);
     const hidden = mail.attachments.filter((attachment) => !attachment.isRealAttachment);
     const ids = [...mail.telegramMessageIds];
     for (const attachment of hidden) {
@@ -359,6 +374,7 @@ export class MailBotApp {
     await this.editPrimary(this.store.getMail(mail.id)!, `🖼 ${hidden.length} تصویر مخفی‌شده برای بررسی ارسال شد. این موارد به‌صورت پیش‌فرض همراه Forward ارسال نمی‌شوند.`, [[
       { text: "↩️ بازگشت و پاک‌سازی", callback_data: `m:${mail.id}:summary`, style: "primary" }
     ]]);
+    }, 3_000);
   }
 
   private async chooseAiContext(mail: StoredMail): Promise<void> {
@@ -380,6 +396,7 @@ export class MailBotApp {
   }
 
   private async showThread(mail: StoredMail): Promise<void> {
+    return this.withMailAction(mail, "thread", async () => {
     await this.editPrimary(mail, "🧵 در حال بازیابی مکالمه از Inbox، Sent و Archive…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }]]);
     const thread = await this.imap.findThread(mail);
     const timeline = thread.map((item, index) => `${index + 1}. ${item.receivedAt.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" })} — ${item.from[0]?.name ?? item.from[0]?.address ?? "نامشخص"}\n${item.subject}`).join("\n\n");
@@ -391,6 +408,7 @@ export class MailBotApp {
       { text: "✨ سؤال از مکالمه", callback_data: `m:${mail.id}:askthread`, style: "primary" },
       { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
     ]]);
+    }, 3_000);
   }
 
   private async showSummary(mail: StoredMail): Promise<void> {
@@ -416,6 +434,7 @@ export class MailBotApp {
     }
     this.store.setState(mail.id, "processing");
     try {
+      await this.editPrimary(mail, "⏳ در حال انتقال ایمیل به Archive و پاک‌سازی کارت…", []);
       await this.imap.archive(mail);
       await this.telegram.deleteMessages(mail.telegramMessageIds);
       this.store.setTelegramMessages(mail.id, []);
@@ -424,12 +443,13 @@ export class MailBotApp {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.store.setState(mail.id, "failed", message);
-      await this.telegram.sendMessage(`❌ انجام عملیات ناموفق بود؛ ایمیل در Inbox باقی ماند.\n${esc(message)}`, [[{ text: "🔄 تلاش مجدد", callback_data: `m:${mail.id}:done`, style: "primary" }]]);
+      await this.editPrimary(mail, `❌ انجام عملیات ناموفق بود؛ ایمیل در Inbox باقی ماند.\n${esc(message)}`, [[{ text: "🔄 تلاش مجدد", callback_data: `m:${mail.id}:done`, style: "primary" }]]);
     }
     });
   }
 
   private async startReply(mail: StoredMail, replyAll: boolean): Promise<void> {
+    return this.withMailAction(mail, "draft", async () => {
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "draft", replyAll);
     await this.editPrimary(mail, "✨ در حال آماده‌سازی پاسخ پیشنهادی AI…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }]]);
     try {
@@ -440,9 +460,15 @@ export class MailBotApp {
       this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "instruction", replyAll);
       await this.editPrimary(mail, "AI در دسترس نیست. بازگردید و بعداً دوباره تلاش کنید.", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
     }
+    }, 3_000);
   }
 
   private async startForward(mail: StoredMail): Promise<void> {
+    const existing = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
+    if (existing?.mode === "forward_recipients") {
+      await this.editPrimary(mail, "↪️ منتظر آدرس گیرنده فوروارد هستم…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
+      return;
+    }
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_recipients", false, "formal", undefined, { kind: "forward" });
     const prompt = await this.telegram.sendMessage("آدرس ایمیل گیرنده را وارد کنید. برای چند گیرنده، آدرس‌ها را با ویرگول جدا کنید:", undefined, false, true);
     this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
@@ -468,6 +494,9 @@ export class MailBotApp {
     const mail = this.store.getMail(conversation.mailId);
     if (!mail) return;
     if (conversation.mode === "ai_question") {
+      await this.editPrimary(mail, "✨ در حال بررسی ایمیل و آماده‌سازی پاسخ AI…", [[
+        { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
+      ]]);
       const useThread = conversation.metadata?.context === "thread";
       const useAttachments = conversation.metadata?.context === "attachments";
       const thread = useThread ? await this.imap.findThread(mail) : [];
@@ -489,6 +518,9 @@ export class MailBotApp {
         await this.telegram.sendMessage("❌ آدرس معتبر پیدا نشد. نمونه: colleague@example.com", undefined, true);
         return;
       }
+      await this.editPrimary(mail, "✨ در حال آماده‌سازی متن پیشنهادی فوروارد…", [[
+        { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
+      ]]);
       let draft = "با درود و مهر\n\nجهت بررسی و اقدام ارسال می‌شود.\n\nبا سپاس";
       try { draft = await this.ai.draftForward(mail, "", conversation.tone); } catch { /* safe fallback */ }
       const metadata = { kind: "forward", recipients };
@@ -540,13 +572,18 @@ export class MailBotApp {
   }
 
   private async changeTone(mail: StoredMail, tone: "formal" | "short" | "friendly"): Promise<void> {
+    return this.withMailAction(mail, "draft", async () => {
     const current = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
     if (!current || current.mailId !== mail.id) return;
     const isForward = current.metadata?.kind === "forward";
+    await this.editPrimary(mail, "✨ در حال بازنویسی پیش‌نویس با لحن انتخابی…", [[
+      { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
+    ]]);
     const draft = isForward ? await this.ai.draftForward(mail, "", tone) : await this.ai.draftReply(mail, "", tone, current.replyAll, await this.imap.findThread(mail));
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", current.replyAll, tone, draft, current.metadata);
     if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(current.metadata));
     else await this.showDraft(mail, draft, current.replyAll);
+    }, 3_000);
   }
 
   private async showForwardDraft(mail: StoredMail, draft: string, recipients: string[]): Promise<void> {
@@ -608,6 +645,7 @@ export class MailBotApp {
     let replySent = outbound.smtpAccepted;
     let sentCopySaved = outbound.sentSaved;
     try {
+      await this.editPrimary(mail, "⏳ در حال ارسال پاسخ، ذخیره در Sent و آرشیو ایمیل…", []);
       if (!replySent) {
         if (await this.imap.sentContainsMessageId(outbound.messageId)) {
           replySent = true; sentCopySaved = true; this.store.markOutbound(mail.id, "sent");
@@ -635,7 +673,7 @@ export class MailBotApp {
       this.logger.info("Reply sent, saved to Sent, mail archived and Telegram cleaned", { mailId: mail.id, replyAll: conversation.replyAll });
     } catch (error) {
       const retryStep = sentCopySaved ? "آرشیو" : "ذخیره در Sent";
-      await this.telegram.sendMessage(`${replySent ? `⚠️ پاسخ ارسال شد، اما مرحله ${retryStep} ناموفق بود. پاسخ دوباره ارسال نمی‌شود.` : "❌ پاسخ ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, replySent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send`, style: "primary" }]] : undefined);
+      await this.editPrimary(mail, `${replySent ? `⚠️ پاسخ ارسال شد، اما مرحله ${retryStep} ناموفق بود. پاسخ دوباره ارسال نمی‌شود.` : "❌ پاسخ ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, replySent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send`, style: "primary" }]] : [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
     }
     });
   }
@@ -655,6 +693,7 @@ export class MailBotApp {
     let forwardSent = outbound.smtpAccepted;
     let sentCopySaved = outbound.sentSaved;
     try {
+      await this.editPrimary(mail, "⏳ در حال فوروارد، ذخیره در Sent و آرشیو ایمیل…", []);
       if (!forwardSent) {
         if (await this.imap.sentContainsMessageId(outbound.messageId)) {
           forwardSent = true; sentCopySaved = true; this.store.markOutbound(mail.id, "sent");
@@ -682,19 +721,29 @@ export class MailBotApp {
       this.logger.info("Mail forwarded with attachments, saved to Sent, archived and Telegram cleaned", { mailId: mail.id, recipientCount: recipients.length });
     } catch (error) {
       const retryStep = sentCopySaved ? "آرشیو" : "ذخیره در Sent";
-      await this.telegram.sendMessage(`${forwardSent ? `⚠️ فوروارد ارسال شد، اما مرحله ${retryStep} ناموفق بود. ایمیل دوباره ارسال نمی‌شود.` : "❌ فوروارد ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, forwardSent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send`, style: "primary" }]] : undefined);
+      await this.editPrimary(mail, `${forwardSent ? `⚠️ فوروارد ارسال شد، اما مرحله ${retryStep} ناموفق بود. ایمیل دوباره ارسال نمی‌شود.` : "❌ فوروارد ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, forwardSent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send`, style: "primary" }]] : [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
     }
     });
   }
 
-  private async withMailAction(mail: StoredMail, action: string, operation: () => Promise<void>): Promise<void> {
+  private async withMailAction(mail: StoredMail, action: string, operation: () => Promise<void>, cooldownMs = 0): Promise<void> {
     const token = randomUUID();
     if (!this.store.acquireActionLock(mail.id, action, token)) {
-      await this.telegram.sendMessage("⏳ یک عملیات دیگر برای این ایمیل در حال اجراست.", undefined, true);
+      this.logger.info("Duplicate Telegram action suppressed", { mailId: mail.id, action });
       return;
     }
     try { await operation(); }
-    finally { this.store.releaseActionLock(mail.id, token); }
+    catch (error) {
+      const message = describeError(error);
+      this.logger.warn("Telegram mail action failed", { mailId: mail.id, action, error: message });
+      const current = this.store.getMail(mail.id);
+      if (current?.telegramMessageIds[0]) {
+        await this.editPrimary(current, `❌ عملیات ناموفق بود.\n${esc(message)}`, [[
+          { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
+        ]]).catch(() => undefined);
+      }
+    }
+    finally { this.store.releaseActionLock(mail.id, token, cooldownMs); }
   }
 
   private outboundMessageId(mailId: number): string {

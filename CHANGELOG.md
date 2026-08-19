@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2 - 2026-08-19
+
+- Defer Inbox reconciliation while IMAP is disconnected and classify disconnect-interrupted scans as recoverable warnings.
+- Preserve nested network error causes and codes in redacted AI and IMAP diagnostics.
+- Show immediate same-card progress for attachment retrieval, AI questions, Forward drafts, thread retrieval, and tone changes.
+- Suppress concurrent and queued duplicate long-running Telegram actions without adding chat messages.
+- Reduce the default per-provider AI timeout to 15 seconds for faster fallback.
+
 ## 0.3.1 - 2026-08-19
 
 - Enforce polished administrative Persian across analysis, Reply, Forward, Thread summary, and Ask AI.

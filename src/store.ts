@@ -166,7 +166,11 @@ export class Store {
     return result.changes === 1;
   }
 
-  releaseActionLock(mailId: number, token: string): void {
+  releaseActionLock(mailId: number, token: string, cooldownMs = 0): void {
+    if (cooldownMs > 0) {
+      this.db.prepare("UPDATE action_locks SET expires_at=? WHERE mail_id=? AND token=?").run(Date.now() + cooldownMs, mailId, token);
+      return;
+    }
     this.db.prepare("DELETE FROM action_locks WHERE mail_id=? AND token=?").run(mailId, token);
   }
 
