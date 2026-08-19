@@ -35,7 +35,7 @@ Keep the user's Exchange Inbox as an actionable queue mirrored in a private Tele
 - `Ask AI` accepts a free-form question scoped to the current mail, extractable real attachments, or the discovered thread, and renders the answer on the same card.
 - The summary card itself is the pending thread view, so it has no redundant `Thread` button. `Ask AI > whole thread` still searches Inbox, configured/discovered Archive, and configured/discovered Sent only by exact Message-ID relationships.
 - A calendar message has a dedicated Persian card showing event type, title, organizer address, Tehran start/end, location or link, attendee count, description, and a deterministic action. Its ICS payload is not counted as a normal or hidden attachment. Invitations remain actionable until the user completes them.
-- Calendar priority is deterministic and cannot be overridden by AI: cancelled/past events are low; unanswered requests within 24 hours are critical, within 72 hours high, within seven days normal-high, and later requests normal.
+- Calendar priority is deterministic and cannot be overridden by AI: cancelled/past events are low; unanswered requests within 24 hours are critical, within 72 hours high, within seven days normal with a higher score, and later requests normal.
 
 ## Calendar response lifecycle
 
