@@ -25,6 +25,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - An expired callback acknowledgement after restart is ignored so the replayed idempotent action can still finish before its offset is persisted.
 - Long-running per-mail actions edit the primary card immediately, use an atomic lock, and retain a short cooldown after completion so queued duplicate callbacks cannot repeat uploads or AI work.
 - Reconciliation is deferred while IMAP is unavailable; the reconnect supervisor performs the retry after restoring the mailbox session.
+- Readiness requires both fresh IMAP reconciliation and a successful Telegram poll within two minutes; startup receives a 90-second Telegram grace period.
 - Duplicate IMAP events are harmless because of the unique identity constraint.
 - Telegram API rate limits honor `retry_after`; transient retries are limited to operations that cannot create duplicate chat messages.
 - Failed Done operations remain visible and retryable.

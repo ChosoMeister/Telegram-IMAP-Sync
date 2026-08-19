@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 - 2026-08-19
+
+- Increase the default AI provider timeout to 45 seconds for large organizational models and complex Reply generation.
+- Mark the service unhealthy when successful Telegram polling is stale for two minutes, with a 90-second startup grace period.
+- Add automatic SELinux relabeling for the read-only mail-rule bind mount on AlmaLinux/RHEL hosts.
+
 ## 0.3.2 - 2026-08-19
 
 - Defer Inbox reconciliation while IMAP is disconnected and classify disconnect-interrupted scans as recoverable warnings.

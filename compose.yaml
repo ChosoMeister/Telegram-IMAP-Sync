@@ -7,7 +7,7 @@ services:
       - .env
     volumes:
       - mailbot-data:/data
-      - ./config:/app/config:ro
+      - ./config:/app/config:ro,Z
     extra_hosts:
       - host.docker.internal:host-gateway
     ports:

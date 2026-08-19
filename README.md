@@ -65,7 +65,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.3.2
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.3.3
 ```
 
 ## Windows installation (Docker Desktop)

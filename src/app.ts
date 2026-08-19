@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { describeError } from "./errors.js";
 
 export class MailBotApp {
+  private readonly startedAt = new Date();
   private syncRunning = false;
   private stopping = false;
   private imapSupervisorRunning = false;
@@ -52,8 +53,12 @@ export class MailBotApp {
   async stop(): Promise<void> { this.stopping = true; await this.imap.stop(); }
 
   isHealthy(): boolean {
-    const syncFresh = Boolean(this.lastSuccessfulSync && Date.now() - this.lastSuccessfulSync.getTime() < Math.max(this.config.IMAP_RECONCILE_SECONDS * 3_000, 120_000));
-    return !this.stopping && this.imap.isConnected() && syncFresh;
+    const now = Date.now();
+    const syncFresh = Boolean(this.lastSuccessfulSync && now - this.lastSuccessfulSync.getTime() < Math.max(this.config.IMAP_RECONCILE_SECONDS * 3_000, 120_000));
+    const telegramFresh = this.lastTelegramPoll
+      ? now - this.lastTelegramPoll.getTime() < 120_000
+      : now - this.startedAt.getTime() < 90_000;
+    return !this.stopping && this.imap.isConnected() && syncFresh && telegramFresh;
   }
 
   status(): Record<string, unknown> {

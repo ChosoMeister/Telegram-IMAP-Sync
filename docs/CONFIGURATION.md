@@ -52,7 +52,7 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 |---|---|---|
 | `AI_ENABLED` | `true` | Disable all analysis/drafting with `false`; mail delivery still works. |
 | `AI_PROVIDER_ORDER` | `ollama,proxy` | Ordered fallback chain. Use `proxy,ollama` to prefer the organization proxy. |
-| `AI_TIMEOUT_MS` | `15000` | Timeout per provider before failover; minimum 1000 ms. Increase only for consistently slow local models. |
+| `AI_TIMEOUT_MS` | `45000` | Timeout per provider before failover; minimum 1000 ms. The default accommodates large organizational models and thread-aware Reply generation. |
 | `AI_CONTEXT_MAX_CHARS` | `60000` | Maximum serialized email/thread/document characters supplied to AI. |
 | `AI_ATTACHMENT_MAX_BYTES` | `10000000` | Stricter maximum file size for in-memory PDF/DOCX/text extraction. |
 | `OLLAMA_BASE_URL` | `http://host.docker.internal:11434` | Ollama API base URL as seen from the container. |

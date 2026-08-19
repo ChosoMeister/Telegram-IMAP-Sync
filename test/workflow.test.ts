@@ -139,6 +139,16 @@ describe("pending queue rotation", () => {
 });
 
 describe("incremental reconciliation recovery", () => {
+  it("marks health stale when Telegram polling has stopped for two minutes", () => {
+    const s = setup();
+    (s.app as any).lastSuccessfulSync = new Date();
+    (s.app as any).lastTelegramPoll = new Date(Date.now() - 121_000);
+    expect(s.app.isHealthy()).toBe(false);
+    (s.app as any).lastTelegramPoll = new Date();
+    expect(s.app.isHealthy()).toBe(true);
+    s.store.close();
+  });
+
   it("defers reconciliation quietly while IMAP is disconnected", async () => {
     const s = setup();
     s.imap.isConnected.mockReturnValue(false);

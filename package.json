@@ -1,6 +1,6 @@
 {
   "name": "telegram-imap-sync",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "A single-user Telegram action inbox for Exchange IMAP mailboxes",
   "type": "module",
