@@ -297,7 +297,7 @@ export class MailBotApp {
   }
 
   private async handleCallback(callbackId: string, data: string): Promise<void> {
-    const match = /^m:(\d+):(summary|body(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|done|reply|replyall|forward|instruct|edit|formal|short|friendly|send|cancel)$/.exec(data);
+    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|done|reply|replyall|forward|instruct|edit|formal|short|friendly|send|cancel)$/.exec(data);
     if (!match) return;
     const requestedMailId = Number(match[1]);
     const requestedMail = this.store.getMail(requestedMailId);
@@ -320,9 +320,10 @@ export class MailBotApp {
     this.logger.info("Telegram action received", { mailId: mail.id, requestedMailId, action });
     if (action === "summary") return this.showSummary(mail);
     if (action?.startsWith("body")) return this.showBody(mail, Number(action.split(":")[1] ?? 0));
+    if (action?.startsWith("allbody")) return this.showAllBodies(mail, Number(action.split(":")[1] ?? 0));
     if (action === "files") return this.showFiles(mail);
     if (action === "hidden") return this.showHiddenFiles(mail);
-    if (action === "thread") return this.showThread(mail);
+    if (action === "thread") return this.showAllBodies(mail, 0);
     if (action === "ask") return this.chooseAiContext(mail);
     if (action === "askmail" || action === "askfiles" || action === "askthread") return this.startAiQuestion(mail, action === "askthread" ? "thread" : action === "askfiles" ? "attachments" : "mail");
     if (action === "done") return this.done(mail);
@@ -368,6 +369,22 @@ export class MailBotApp {
     navigation.push({ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" as const });
     if (page < chunks.length - 1) navigation.push({ text: "بعدی ➡️", callback_data: `m:${mail.id}:body:${page + 1}` });
     await this.editPrimary(mail, `<b>متن ایمیل — ${page + 1}/${chunks.length}</b>\n\n${esc(chunks[page]!)}`, [navigation]);
+  }
+
+  private async showAllBodies(mail: StoredMail, requestedPage = 0): Promise<void> {
+    const members = this.store.threadMembers(mail.id);
+    const combined = members.map((item, index) => {
+      const sender = item.from.map((address) => address.name ? `${address.name} <${address.address}>` : address.address).join(", ") || "نامشخص";
+      const receivedAt = new Intl.DateTimeFormat("fa-IR", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Tehran" }).format(item.receivedAt);
+      return `${index + 1}. از: ${sender}\nزمان: ${receivedAt}\nموضوع: ${item.subject}\n\n${item.text || "متن قابل استخراج نیست."}`;
+    }).join("\n\n────────────────────\n\n");
+    const chunks = splitTelegramText(combined || "متن قابل استخراج نیست.");
+    const page = Math.max(0, Math.min(requestedPage, chunks.length - 1));
+    const navigation = [];
+    if (page > 0) navigation.push({ text: "⬅️ قبلی", callback_data: `m:${mail.id}:allbody:${page - 1}` });
+    navigation.push({ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" as const });
+    if (page < chunks.length - 1) navigation.push({ text: "بعدی ➡️", callback_data: `m:${mail.id}:allbody:${page + 1}` });
+    await this.editPrimary(mail, `<b>متن همه پیام‌ها — ${members.length} پیام — ${page + 1}/${chunks.length}</b>\n\n${esc(chunks[page]!)}`, [navigation]);
   }
 
   private async showFiles(mail: StoredMail): Promise<void> {
@@ -427,22 +444,6 @@ export class MailBotApp {
     await this.editPrimary(mail, `✨ منتظر سؤال شما درباره ${label} هستم…`, [[
       { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
     ]]);
-  }
-
-  private async showThread(mail: StoredMail): Promise<void> {
-    return this.withMailAction(mail, "thread", async () => {
-    await this.editPrimary(mail, "🧵 در حال بازیابی مکالمه از Inbox، Sent و Archive…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }]]);
-    const thread = await this.imap.findThread(mail);
-    const timeline = thread.map((item, index) => `${index + 1}. ${item.receivedAt.toLocaleDateString("fa-IR", { timeZone: "Asia/Tehran" })} — ${item.from[0]?.name ?? item.from[0]?.address ?? "نامشخص"}\n${item.subject}`).join("\n\n");
-    let summary = "";
-    try { summary = await this.ai.ask(mail, "کل مکالمه را خلاصه کن، آخرین وضعیت و اقدام مورد انتظار از من را مشخص کن.", thread); }
-    catch { summary = "خلاصه AI در دسترس نیست؛ Timeline بازیابی شد."; }
-    const text = splitTelegramText(`<b>🧵 خلاصه مکالمه — ${thread.length} پیام</b>\n\n${esc(summary)}\n\n<b>Timeline</b>\n${esc(timeline)}`)[0]!;
-    await this.editPrimary(mail, text, [[
-      { text: "✨ سؤال از مکالمه", callback_data: `m:${mail.id}:askthread`, style: "primary" },
-      { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
-    ]]);
-    }, 3_000);
   }
 
   private async showSummary(mail: StoredMail): Promise<void> {

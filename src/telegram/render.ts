@@ -32,7 +32,10 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
 export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
   const id = mail.id;
   const rows: Array<Array<{ text: string; callback_data: string; style?: "danger" | "success" | "primary" }>> = [
-    [{ text: thread.length > 1 ? "📄 آخرین پیام" : "📄 متن کامل", callback_data: `m:${id}:body`, style: "primary" }]
+    [
+      { text: thread.length > 1 ? "📄 آخرین پیام" : "📄 متن پیام", callback_data: `m:${id}:body`, style: "primary" },
+      { text: "📚 متن همه پیام‌ها", callback_data: `m:${id}:allbody`, style: "primary" }
+    ]
   ];
   if (thread.some((item) => item.attachments.some((a) => a.isRealAttachment))) rows[0]?.push({ text: "📎 دریافت فایل‌ها", callback_data: `m:${id}:files` });
   if (thread.some((item) => item.attachments.some((a) => !a.isRealAttachment))) rows.push([{ text: "🖼 بررسی تصاویر مخفی", callback_data: `m:${id}:hidden` }]);
@@ -44,8 +47,7 @@ export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
   if (mail.cc.length || mail.to.length > 1) actionRow.push({ text: "👥 Reply All", callback_data: `m:${id}:replyall` });
   rows.push(actionRow);
   rows.push([
-    { text: "✨ از AI بپرس", callback_data: `m:${id}:ask`, style: "primary" },
-    { text: "🧵 مکالمه", callback_data: `m:${id}:thread` }
+    { text: "✨ از AI بپرس", callback_data: `m:${id}:ask`, style: "primary" }
   ]);
   return rows;
 }

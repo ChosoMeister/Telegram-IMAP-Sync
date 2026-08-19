@@ -203,6 +203,18 @@ describe("single-card navigation", () => {
     s.store.close();
   });
 
+  it("renders every merged Inbox message with sections and pagination on the same card", async () => {
+    const s = setup();
+    s.store.upsertMail({ ...incoming, uid: 8, messageId: "<reply@example.com>", inReplyTo: incoming.messageId, subject: "Re: Test", text: "Second message", receivedAt: new Date("2026-08-18T11:00:00Z") });
+    const representativeId = s.store.threadRepresentative(s.id)!.id;
+    s.store.setTelegramMessages(representativeId, [100]);
+    const representative = s.store.getMail(representativeId)!;
+    await (s.app as any).showAllBodies(representative, 0);
+    expect(s.telegram.editMessage).toHaveBeenCalledWith(100, expect.stringContaining("متن همه پیام‌ها — 2 پیام"), expect.any(Array));
+    expect(s.telegram.editMessage.mock.calls.at(-1)?.[1]).toContain("Second message");
+    s.store.close();
+  });
+
   it("back removes auxiliary messages and restores the primary card", async () => {
     const s = setup();
     await (s.app as any).showSummary(s.store.getMail(s.id));

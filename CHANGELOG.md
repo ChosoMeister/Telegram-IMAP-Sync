@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 - 2026-08-19
+
+- Add same-card, paginated `All message texts` with chronological sender, address, time, subject, and body sections.
+- Keep a separate `Latest message` action and remove the redundant `Thread` button from every summary card.
+- Preserve old `Thread` callbacks as a safe compatibility alias for `All message texts` while existing cards are refreshed.
+
 ## 0.4.0 - 2026-08-19
 
 - Consolidate exact RFC-related Inbox replies into one chronological Telegram card represented by the newest pending message.
