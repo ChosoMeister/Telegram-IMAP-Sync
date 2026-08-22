@@ -50,6 +50,7 @@ export class SpeechToTextService {
   }
 
   private async transcribeModel(model: string, content: Buffer, filename: string): Promise<AsrCandidate> {
+    const startedAt = Date.now();
     const form = new FormData();
     form.set("file", new Blob([new Uint8Array(content)]), filename);
     form.set("model", model);
@@ -66,6 +67,7 @@ export class SpeechToTextService {
     catch { throw new Error("STT returned invalid JSON"); }
     const text = typeof json.text === "string" ? json.text.trim() : "";
     if (!text) throw new Error("STT returned an empty transcript");
+    this.logger.info("Speech-to-text model completed", { model, durationMs: Date.now() - startedAt });
     return { model, text };
   }
 }

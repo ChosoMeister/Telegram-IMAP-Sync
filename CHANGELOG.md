@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.2 - 2026-08-22
+
+- Distinguish `subscribe` from `unsubscribe` per local spoken context, resolve supported participant names without forcing Latin output, and add content-free per-model/judge timing telemetry for Voice diagnostics.
+
 ## 0.11.1 - 2026-08-22
 
 - Prefer a configurable fast transcript judge independently from the regular email AI order, bound adjudication context to 8K characters, and improve conservative phonetic recovery for mixed Persian-English speech.

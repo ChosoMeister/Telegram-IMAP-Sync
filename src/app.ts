@@ -679,6 +679,8 @@ export class MailBotApp {
         return;
       }
       if (!this.stt) throw new Error("Speech-to-text service is unavailable");
+      const voiceStartedAt = Date.now();
+      this.logger.info("Voice instruction received", { mailId: mail.id, durationSeconds: message.voice.duration, declaredBytes: message.voice.file_size });
       this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, message.message_id], mail.telegramCreatedAt);
       await this.editPrimary(mail, "🎧 در حال پردازش موازی Voice با دو مدل و داوری خروجی‌ها…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }]]);
       try {
@@ -686,6 +688,7 @@ export class MailBotApp {
         const extension = downloaded.filePath.split(".").pop()?.replace(/[^a-z0-9]/gi, "") || "ogg";
         const parallel = await this.stt.transcribe(downloaded.content, `voice.${extension}`);
         const consensus = await this.ai.reconcileVoiceTranscript(mail, parallel.candidates);
+        this.logger.info("Voice instruction review prepared", { mailId: mail.id, durationMs: Date.now() - voiceStartedAt, candidates: parallel.candidates.length, failedModels: parallel.failedModels.length, judge: consensus.provider, confidence: consensus.confidence });
         const metadata = { ...(conversation.metadata ?? {}), voiceTranscript: consensus.finalTranscript, voiceCandidates: parallel.candidates, voiceConsensus: consensus, voiceFailedModels: parallel.failedModels };
         this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "voice_review", conversation.replyAll, conversation.tone, conversation.draft, metadata);
         await this.cleanupConversationMessages(mail, message.message_id);
