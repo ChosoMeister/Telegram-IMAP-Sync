@@ -21,7 +21,8 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Multi-signal separation of real attachments from CID images, logos, icons, and signature assets, with an on-demand hidden-file review
 - Done: verified Exchange archive, then Telegram cleanup
 - Pending queue rotation every 36 hours, oldest-to-newest and silent
-- AI-assisted Reply and Reply All with tone, custom instruction, direct editing, and explicit approval
+- AI-assisted Reply and Reply All with tone, typed or Telegram Voice instruction, direct editing, and explicit approval
+- In-memory Persian speech-to-text with ordered OpenAI-compatible ASR fallback, visible transcript, exact ForceReply mail binding, and no retained audio
 - Exact ForceReply-to-mail binding, preventing text meant for one open draft/question from being applied to another
 - AI-assisted Forward to one or more recipients with a custom note and original attachments
 - Free-form Ask AI over the current message, extractable PDF/DOCX/text attachments, or the full mail thread
@@ -78,7 +79,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.9.0
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.10.0
 ```
 
 ## Windows installation (Docker Desktop)

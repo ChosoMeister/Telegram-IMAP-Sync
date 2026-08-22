@@ -3,6 +3,7 @@ import type { AppConfig } from "../config.js";
 export interface TelegramMessage {
   message_id: number;
   text?: string;
+  voice?: { file_id: string; file_unique_id: string; duration: number; mime_type?: string; file_size?: number };
   from?: { id: number };
   chat: { id: number };
   reply_to_message?: Pick<TelegramMessage, "message_id">;
@@ -50,6 +51,30 @@ export class TelegramApi {
   getMe(): Promise<{ id: number; username?: string; is_bot: boolean }> { return this.call("getMe", {}); }
   getChat(): Promise<{ id: number; type: string }> { return this.call("getChat", { chat_id: this.config.TELEGRAM_USER_ID }); }
   getWebhookInfo(): Promise<{ url: string; pending_update_count: number }> { return this.call("getWebhookInfo", {}); }
+
+  async downloadFile(fileId: string, maxBytes: number): Promise<{ content: Buffer; filePath: string }> {
+    const file = await this.call<{ file_path?: string; file_size?: number }>("getFile", { file_id: fileId });
+    if (!file.file_path) throw new Error("Telegram did not return a downloadable file path");
+    if ((file.file_size ?? 0) > maxBytes) throw new Error("Telegram voice exceeds the configured size limit");
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const response = await fetch(`https://api.telegram.org/file/bot${this.config.TELEGRAM_BOT_TOKEN}/${file.file_path}`, {
+          signal: AbortSignal.timeout(60_000)
+        });
+        if (!response.ok) throw new Error(`Telegram file download failed: HTTP ${response.status}`);
+        const declaredLength = Number(response.headers.get("content-length") ?? 0);
+        if (declaredLength > maxBytes) throw new Error("Telegram voice exceeds the configured size limit");
+        const content = Buffer.from(await response.arrayBuffer());
+        if (content.length > maxBytes) throw new Error("Telegram voice exceeds the configured size limit");
+        return { content, filePath: file.file_path };
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await this.delay(500 * (2 ** attempt));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error("Telegram file download failed");
+  }
 
   sendMessage(text: string, buttons?: Button[][], silent = false, forceReply = false): Promise<TelegramMessage> {
     return this.call("sendMessage", {

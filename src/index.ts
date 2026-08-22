@@ -13,6 +13,7 @@ import { MailRuleService } from "./rules.js";
 import { loadHonorifics } from "./honorifics.js";
 import { loadUserProfile } from "./user-profile.js";
 import { loadMailAccountConfigs } from "./accounts.js";
+import { SpeechToTextService } from "./stt.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -27,8 +28,9 @@ async function main(): Promise<void> {
   const smtp = primary.smtp;
   const telegram = new TelegramApi(config);
   const ai = new AiService(config, logger, await loadHonorifics(config.HONORIFICS_PATH), await loadUserProfile(config.USER_PROFILE_PATH));
+  const stt = new SpeechToTextService(config, logger);
   const rules = await MailRuleService.load(config.MAIL_RULES_PATH);
-  const app = new MailBotApp(primary.config, store, imap, smtp, telegram, ai, logger, rules, runtimes.slice(1));
+  const app = new MailBotApp(primary.config, store, imap, smtp, telegram, ai, logger, rules, runtimes.slice(1), stt);
 
   const runBackup = async () => {
     try {
@@ -67,7 +69,10 @@ async function main(): Promise<void> {
   process.once("SIGINT", () => void shutdown("SIGINT"));
   process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-  logger.info("Starting Telegram IMAP Sync", { mode: config.APP_MODE, aiOrder: config.aiProviderOrder, mailRules: rules.count, accounts: runtimes.map((account) => account.id) });
+  logger.info("Starting Telegram IMAP Sync", {
+    mode: config.APP_MODE, aiOrder: config.aiProviderOrder, voiceReply: config.VOICE_REPLY_ENABLED,
+    sttModels: config.VOICE_REPLY_ENABLED ? config.sttModelOrder : [], mailRules: rules.count, accounts: runtimes.map((account) => account.id)
+  });
   await app.start();
   await runBackup();
   setInterval(() => void runBackup(), config.BACKUP_INTERVAL_HOURS * 3_600_000).unref();

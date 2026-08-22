@@ -76,6 +76,24 @@ Port `587` with `SMTP_SECURE=false` is the STARTTLS alternative. Folder names ab
 | `TELEGRAM_REFRESH_HOURS` | `36` | Safe pending-card refresh interval; allowed range 1–47 hours. |
 | `TELEGRAM_INITIAL_IMPORT_SILENT` | `false` | Send the initial Inbox import without notifications when `true`. |
 
+## Voice reply and speech-to-text
+
+| Variable | Required/default | Purpose |
+|---|---|---|
+| `VOICE_REPLY_ENABLED` | `false` | Shows Voice instruction controls for Reply, Reply All, and Forward. Requires an STT endpoint and key. |
+| `VOICE_MAX_SECONDS` | `180` | Rejects longer Telegram Voice messages before download; range 1–600 seconds. |
+| `VOICE_MAX_BYTES` | `10000000` | Rejects oversized Voice messages before STT; maximum accepted configuration is Telegram's 20 MB download limit. |
+| `VOICE_KEEP_AUDIO` | `false` | Must remain `false`. Audio is held in memory only and is never persisted by the application. |
+| `STT_BASE_URL` | required when Voice is enabled | OpenAI-compatible base URL ending in `/v1`; the application calls `/audio/transcriptions`. |
+| `STT_API_KEY` | required when Voice is enabled | Bearer key for the transcription endpoint. Keep it only in the ignored production `.env`. |
+| `STT_MODEL_ORDER` | Qwen, then Whisper | Ordered model fallback, for example `local-qwen3-asr-1.7b,local-whisper-large-v3`. |
+| `STT_LANGUAGE` | `fa` | Language hint passed to every transcription request. |
+| `STT_TIMEOUT_MS` | `90000` | Independent timeout for each ASR model; range 1–300 seconds. |
+
+The bot accepts Voice only as a direct Telegram Reply to the exact ForceReply prompt opened for one mail. It checks duration and declared size before download, downloads the OGG/Opus payload from Telegram, and sends it as multipart form data to each configured model until one returns a non-empty JSON `text`. Timeout, network failure, non-2xx status, invalid JSON, or empty text advances to the next model. The transcript is shown with the AI draft and stored only as conversation text; the audio buffer is released after the update handler completes.
+
+Voice is an instruction to the drafting model, not an automatic outbound message. The transcript, current mail/thread, selected Reply/Reply All/Forward operation, owner profile, and chosen tone produce a normal review draft. SMTP remains impossible until the user explicitly presses final approval.
+
 ## AI
 
 | Variable | Required/default | Purpose |

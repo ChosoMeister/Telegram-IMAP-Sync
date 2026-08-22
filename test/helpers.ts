@@ -9,9 +9,11 @@ export const config: MailAccountAppConfig = {
   TEST_IMPORT_LIMIT: 0, THREAD_MAX_MESSAGES: 30, MAX_ATTACHMENT_BYTES: 25_000_000,
   SMTP_HOST: "smtp.example", SMTP_PORT: 587, SMTP_SECURE: false, SMTP_USER: "user", SMTP_PASSWORD: "pass", SMTP_FROM: "me@example.com",
   TELEGRAM_BOT_TOKEN: "1234567890:test", TELEGRAM_USER_ID: 42, TELEGRAM_REFRESH_HOURS: 36, TELEGRAM_INITIAL_IMPORT_SILENT: false,
+  VOICE_REPLY_ENABLED: false, VOICE_MAX_SECONDS: 180, VOICE_MAX_BYTES: 10_000_000, VOICE_KEEP_AUDIO: false,
+  STT_MODEL_ORDER: "local-qwen3-asr-1.7b,local-whisper-large-v3", STT_LANGUAGE: "fa", STT_TIMEOUT_MS: 90_000,
   AI_PROVIDER_ORDER: "ollama,proxy", AI_TIMEOUT_MS: 1000, AI_CONTEXT_MAX_CHARS: 60_000, AI_ATTACHMENT_MAX_BYTES: 10_000_000, OLLAMA_BASE_URL: "http://localhost:11434", OLLAMA_MODEL: "test",
   AI_PROXY_MODEL: "test", AI_ENABLED: true,
-  aiProviderOrder: ["ollama", "proxy"], aiProxyModelOrder: ["test"]
+  aiProviderOrder: ["ollama", "proxy"], aiProxyModelOrder: ["test"], sttModelOrder: ["local-qwen3-asr-1.7b", "local-whisper-large-v3"]
 };
 
 export const incoming: IncomingMail = {

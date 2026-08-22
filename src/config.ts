@@ -41,6 +41,16 @@ const schema = z.object({
   TELEGRAM_REFRESH_HOURS: z.coerce.number().min(1).max(47).default(36),
   TELEGRAM_INITIAL_IMPORT_SILENT: bool.default(false),
 
+  VOICE_REPLY_ENABLED: bool.default(false),
+  VOICE_MAX_SECONDS: z.coerce.number().int().min(1).max(600).default(180),
+  VOICE_MAX_BYTES: z.coerce.number().int().min(1_000).max(20_000_000).default(10_000_000),
+  VOICE_KEEP_AUDIO: bool.default(false),
+  STT_BASE_URL: z.string().url().optional(),
+  STT_API_KEY: z.string().optional(),
+  STT_MODEL_ORDER: z.string().default("local-qwen3-asr-1.7b,local-whisper-large-v3"),
+  STT_LANGUAGE: z.string().min(2).max(16).default("fa"),
+  STT_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(90_000),
+
   AI_PROVIDER_ORDER: z.string().default("ollama,proxy"),
   AI_TIMEOUT_MS: z.coerce.number().int().min(1000).default(45000),
   AI_CONTEXT_MAX_CHARS: z.coerce.number().int().min(4_000).default(60_000),
@@ -54,15 +64,20 @@ const schema = z.object({
   AI_ENABLED: bool.default(true)
 });
 
-export type AppConfig = z.infer<typeof schema> & { aiProviderOrder: string[]; aiProxyModelOrder: string[] };
+export type AppConfig = z.infer<typeof schema> & { aiProviderOrder: string[]; aiProxyModelOrder: string[]; sttModelOrder: string[] };
 type RequiredMailKey = "IMAP_HOST" | "IMAP_USER" | "IMAP_PASSWORD" | "SMTP_HOST" | "SMTP_USER" | "SMTP_PASSWORD" | "SMTP_FROM";
 export type MailAccountAppConfig = Omit<AppConfig, RequiredMailKey> & { [K in RequiredMailKey]-?: Exclude<AppConfig[K], undefined> } & { mailAccountId: string; mailAccountLabel: string };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = schema.parse(env);
+  if (parsed.VOICE_REPLY_ENABLED && (!parsed.STT_BASE_URL || !parsed.STT_API_KEY)) {
+    throw new Error("VOICE_REPLY_ENABLED=true requires STT_BASE_URL and STT_API_KEY");
+  }
+  if (parsed.VOICE_KEEP_AUDIO) throw new Error("VOICE_KEEP_AUDIO=true is not supported; voice audio must remain ephemeral");
   return {
     ...parsed,
     aiProviderOrder: parsed.AI_PROVIDER_ORDER.split(",").map((v) => v.trim()).filter(Boolean),
-    aiProxyModelOrder: (parsed.AI_PROXY_MODEL_ORDER || parsed.AI_PROXY_MODEL).split(",").map((v) => v.trim()).filter(Boolean)
+    aiProxyModelOrder: (parsed.AI_PROXY_MODEL_ORDER || parsed.AI_PROXY_MODEL).split(",").map((v) => v.trim()).filter(Boolean),
+    sttModelOrder: parsed.STT_MODEL_ORDER.split(",").map((v) => v.trim()).filter(Boolean)
   };
 }

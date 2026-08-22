@@ -2,7 +2,13 @@
 
 ## Unreleased
 
+## 0.10.0 - 2026-08-22
+
 - Document Gmail and Google Workspace as supported independent accounts using IMAP/SMTP, Google App Passwords, discovered folder paths, and the existing account-scoped All Inbox routing.
+- Add Persian Telegram Voice instructions for Reply, Reply All, and Forward while preserving exact ForceReply-to-mail binding and final approval.
+- Download bounded Voice payloads from Telegram in memory, transcribe through ordered OpenAI-compatible ASR models, and fall back from Qwen3-ASR to Whisper on timeout, HTTP failure, invalid JSON, or empty output.
+- Display the extracted transcript beside the generated draft, expose STT health without content or secrets, and never persist source audio.
+- Add production configuration validation, regression coverage, bilingual documentation, and operational troubleshooting for Voice/STT.
 
 ## 0.9.0 - 2026-08-19
 

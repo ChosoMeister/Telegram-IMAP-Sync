@@ -5,14 +5,14 @@ import { Logger } from "../src/logger.js";
 import { config, incoming } from "./helpers.js";
 
 function setup(archive = vi.fn().mockResolvedValue(undefined)) {
-  const isolatedConfig = { ...config, aiProviderOrder: [...config.aiProviderOrder] };
+  const isolatedConfig = { ...config, aiProviderOrder: [...config.aiProviderOrder], sttModelOrder: [...config.sttModelOrder] };
   const store = new Store(":memory:");
   const { id } = store.upsertMail(incoming);
   store.setTelegramMessages(id, [100, 101]);
   const telegram = {
     answerCallbackQuery: vi.fn().mockResolvedValue(true), deleteMessages: vi.fn().mockResolvedValue(true),
     sendMessage: vi.fn().mockResolvedValue({ message_id: 200, chat: { id: 42 } }), editMessage: vi.fn().mockResolvedValue(true),
-    sendDocument: vi.fn(), getUpdates: vi.fn()
+    sendDocument: vi.fn(), downloadFile: vi.fn().mockResolvedValue({ content: Buffer.from("voice"), filePath: "voice/file_1.ogg" }), getUpdates: vi.fn()
   };
   const imap = {
     archive, archiveMany: vi.fn(async (mails: any[]) => archive(mails[0])), fetchAttachment: vi.fn(), scanInbox: vi.fn().mockResolvedValue([]), connect: vi.fn(), waitForChanges: vi.fn(), stop: vi.fn(),
@@ -21,10 +21,14 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
     mailboxIdentity: vi.fn().mockReturnValue({ path: incoming.mailbox, uidValidity: incoming.uidValidity }), isConnected: vi.fn().mockReturnValue(true),
     listInboxUids: vi.fn().mockResolvedValue(new Set([incoming.uid]))
   };
-  const ai = { analyze: vi.fn().mockResolvedValue(undefined), ask: vi.fn().mockResolvedValue("پاسخ آزمایشی"), status: vi.fn().mockReturnValue({}) };
+  const ai = {
+    analyze: vi.fn().mockResolvedValue(undefined), ask: vi.fn().mockResolvedValue("پاسخ آزمایشی"),
+    draftReply: vi.fn().mockResolvedValue("پیش‌نویس صوتی"), draftForward: vi.fn().mockResolvedValue("متن فوروارد"), status: vi.fn().mockReturnValue({})
+  };
+  const stt = { transcribe: vi.fn().mockResolvedValue("به ایشان بگو تا فردا انجام می‌شود"), status: vi.fn().mockReturnValue({ ok: true }) };
   const smtp = { status: vi.fn().mockReturnValue({}), verify: vi.fn().mockResolvedValue(undefined), buildReply: vi.fn().mockResolvedValue(Buffer.from("raw")), buildCalendarResponse: vi.fn().mockResolvedValue({ raw: Buffer.from("calendar-raw"), organizer: "organizer@example.com" }), sendRaw: vi.fn().mockResolvedValue(undefined) };
-  const app = new MailBotApp(isolatedConfig, store, imap as any, smtp as any, telegram as any, ai as any, new Logger("error"));
-  return { app, store, telegram, imap, smtp, archive, id };
+  const app = new MailBotApp(isolatedConfig, store, imap as any, smtp as any, telegram as any, ai as any, new Logger("error"), undefined, [], stt as any);
+  return { app, store, telegram, imap, smtp, ai, stt, archive, id };
 }
 
 describe("Done transaction", () => {
@@ -284,6 +288,48 @@ describe("single-card navigation", () => {
     await (s.app as any).handleText({ message_id: 600, chat: { id: 42 }, reply_to_message: { message_id: 501 }, text: "ایمیل اول چیست؟", from: { id: 42 } });
     expect((s.app as any).ai.ask).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "ایمیل اول چیست؟", [], "");
     expect(s.store.getConversation(42, other.id)).toBeDefined();
+    s.store.close();
+  });
+
+  it("binds a voice instruction to its exact mail and builds a review draft", async () => {
+    const s = setup();
+    (s.app as any).config.VOICE_REPLY_ENABLED = true;
+    s.store.setConversation(42, s.id, "voice_instruction", false, "formal", "old draft", undefined, 501);
+    await (s.app as any).handleText({
+      message_id: 601, chat: { id: 42 }, reply_to_message: { message_id: 501 }, from: { id: 42 },
+      voice: { file_id: "voice-file", file_unique_id: "voice-unique", duration: 12, file_size: 5000, mime_type: "audio/ogg" }
+    });
+    expect(s.telegram.downloadFile).toHaveBeenCalledWith("voice-file", 10_000_000);
+    expect(s.stt.transcribe).toHaveBeenCalledWith(Buffer.from("voice"), "voice.ogg");
+    expect(s.ai.draftReply).toHaveBeenCalledWith(
+      expect.objectContaining({ id: s.id }), "به ایشان بگو تا فردا انجام می‌شود", "formal", false, [incoming]
+    );
+    expect(s.store.getConversation(42, s.id)).toMatchObject({ mode: "review", draft: "پیش‌نویس صوتی" });
+    expect(s.telegram.editMessage).toHaveBeenLastCalledWith(100, expect.stringContaining("متن استخراج‌شده از Voice"), expect.any(Array));
+    s.store.close();
+  });
+
+  it("opens a voice prompt after removing stale auxiliary messages", async () => {
+    const s = setup();
+    (s.app as any).config.VOICE_REPLY_ENABLED = true;
+    s.store.setConversation(42, s.id, "review", false, "formal", "draft");
+    await (s.app as any).handleCallback("cb-voice", `m:${s.id}:voice`);
+    expect(s.telegram.deleteMessages).toHaveBeenCalledWith([101]);
+    expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([100, 200]);
+    expect(s.store.getConversation(42, s.id)).toMatchObject({ mode: "voice_instruction", promptMessageId: 200 });
+    s.store.close();
+  });
+
+  it("rejects an oversized voice before downloading it", async () => {
+    const s = setup();
+    (s.app as any).config.VOICE_REPLY_ENABLED = true;
+    s.store.setConversation(42, s.id, "voice_instruction", false, "formal", undefined, undefined, 501);
+    await (s.app as any).handleText({
+      message_id: 602, chat: { id: 42 }, reply_to_message: { message_id: 501 }, from: { id: 42 },
+      voice: { file_id: "too-large", file_unique_id: "large", duration: 12, file_size: 10_000_001 }
+    });
+    expect(s.telegram.downloadFile).not.toHaveBeenCalled();
+    expect(s.stt.transcribe).not.toHaveBeenCalled();
     s.store.close();
   });
 });

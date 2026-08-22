@@ -9,6 +9,7 @@ Telegram long polling <── action controller <──────────�
         │                         │
         ├── full body/files       ├── atomic lock ──> IMAP MOVE + verification
         ├── Ask AI ──> document extraction / thread lookup
+        ├── Voice ──> Telegram file ──> ordered STT ──> transcript ──> AI draft review
         └── reply/calendar workflow ──> durable RFC822 ──> SMTP ──> Sent APPEND ──> IMAP MOVE
 ```
 
@@ -35,6 +36,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - SMTP-success/Sent-copy-pending and Sent-copy-success/archive-pending are distinct states, so retries cannot duplicate the reply.
 - Calendar Accept/Tentative/Decline reuses the same durable outbound stages and atomic lock; the stored iTIP response fixes UID, Sequence, Organizer, attendee, and PARTSTAT across retries.
 - AI results are optional and can be regenerated after restart.
+- Voice instructions reuse exact ForceReply prompt binding, are bounded by duration and bytes before download, and remain in memory only. Ordered ASR failure falls through without changing the mail or sending SMTP; the transcript enters the existing review/approval lifecycle as text.
 - AI output passes through a provider-independent Persian style normalizer; therefore fallback-provider changes cannot reintroduce disallowed greetings or closings.
 - Optional trusted owner identity is added to AI context. Analysis records whether an action belongs to self, another person, both, or is unknown; a deterministic alias-aware pass prevents the owner from being presented in third person.
 - Reply output also passes through a gender-safety normalizer: it strips unverified gendered titles and applies only an optional exact email-address override.

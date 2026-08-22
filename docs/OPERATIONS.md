@@ -31,6 +31,7 @@ For a new additional account, validate its folders and SMTP in a one-off dry-run
 3. Set `IMAP_ARCHIVE_MAILBOX` and `IMAP_SENT_MAILBOX` to verified existing paths.
 4. Run `docker compose run --rm mailbot npm run preflight`.
 5. Verify one imported card, full-text pagination, attachments, and AI fallback.
+   When Voice is enabled, also record one controlled Persian instruction, verify the displayed transcript, force the primary ASR to fail in a test environment, and confirm the fallback model succeeds without retaining audio.
 6. In live mode, send one controlled Reply and verify SMTP delivery, Outlook threading, the exact copy in the configured sent mailbox, source archiving, and Telegram cleanup.
 7. Set `TEST_IMPORT_LIMIT=0` for production.
 
@@ -86,6 +87,9 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **IMAP `ECONNREFUSED`:** test DNS and TCP reachability from inside the container. An internal hostname must resolve to the internal address there; Docker cannot bypass firewall/routing policy.
 - **Telegram `ECONNREFUSED`:** the host/network is blocking `api.telegram.org:443`. Fix routing, proxy, or firewall; repeated container restarts will not solve it.
 - **AI proxy returns 404 at `/v1`:** a base endpoint may legitimately return 404. Test `/v1/chat/completions`; AI failure is non-blocking and falls through according to `AI_PROVIDER_ORDER`.
+- **Voice button is missing:** set `VOICE_REPLY_ENABLED=true`, configure `STT_BASE_URL`, `STT_API_KEY`, and at least one `STT_MODEL_ORDER` entry, then recreate the container. A restart does not load changed Compose environment values unless the container is recreated.
+- **Voice transcription fails:** test the exact `/v1/audio/transcriptions` endpoint with multipart `file`, `model`, `language=fa`, and `response_format=json`. Do not manually set the multipart Content-Type boundary. Health exposes the last STT model/error without audio, transcript, or API key.
+- **Voice is ignored:** send it as Telegram Reply to the exact Voice prompt for that mail. Duration and size limits are checked before download; text sent to a Voice prompt is rejected deliberately.
 - **Ollama unavailable:** confirm the host listener accepts Docker traffic and use `host.docker.internal`, not container loopback.
 - **Reply delivered but no sent copy:** verify `IMAP_SENT_MAILBOX` and APPEND permission. The transaction remains at the Sent-copy stage and does not blindly repeat accepted SMTP.
 - **Ambiguous SMTP attempt:** inspect the configured sent mailbox for the persisted Message-ID before any manual retry. Duplicate prevention intentionally wins over automatic resend.

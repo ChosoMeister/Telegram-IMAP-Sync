@@ -16,6 +16,7 @@ import type { MailRuleService } from "./rules.js";
 import { randomUUID } from "node:crypto";
 import { describeError } from "./errors.js";
 import type { MailAccountRuntime } from "./accounts.js";
+import type { SpeechToTextService } from "./stt.js";
 
 export class MailBotApp {
   private readonly startedAt = new Date();
@@ -32,7 +33,7 @@ export class MailBotApp {
   constructor(
     private config: MailAccountAppConfig, private store: Store, private imap: ImapService,
     private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger,
-    private rules?: MailRuleService, additionalAccounts: MailAccountRuntime[] = []
+    private rules?: MailRuleService, additionalAccounts: MailAccountRuntime[] = [], private stt?: SpeechToTextService
   ) {
     this.accounts = [{ id: config.mailAccountId, label: config.mailAccountLabel, config, imap, smtp }, ...additionalAccounts];
     this.primaryAccountId = this.accounts[0]!.id;
@@ -78,7 +79,7 @@ export class MailBotApp {
       ok: this.isHealthy(), imapConnected: this.accounts.every((account) => account.imap.isConnected()), syncRunning: this.syncRunning,
       accounts: Object.fromEntries(this.accounts.map((account) => [account.id, { label: account.label, imapConnected: account.imap.isConnected(), lastSuccessfulSync: this.lastSuccessfulSync.get(account.id)?.toISOString(), inboxCount: this.inboxCount.get(account.id) ?? 0, smtp: account.smtp.status() }])),
       lastTelegramPoll: this.lastTelegramPoll?.toISOString(), inboxCount: [...this.inboxCount.values()].reduce((sum, count) => sum + count, 0),
-      jobs: this.store.jobCounts(), ai: this.ai.status(), smtp: this.smtp.status(), telegram: this.telegram.status(),
+      jobs: this.store.jobCounts(), ai: this.ai.status(), stt: this.stt?.status() ?? { enabled: false }, smtp: this.smtp.status(), telegram: this.telegram.status(),
       backup: { lastSuccess: this.store.getKv("backup:last-success"), lastError: this.store.getKv("backup:last-error") }, ...this.store.counts()
     };
   }
@@ -315,11 +316,11 @@ export class MailBotApp {
     const userId = update.callback_query?.from.id ?? update.message?.from?.id;
     if (userId !== this.config.TELEGRAM_USER_ID) return;
     if (update.callback_query?.data) await this.handleCallback(update.callback_query.id, update.callback_query.data);
-    else if (update.message?.text) await this.handleText(update.message);
+    else if (update.message?.text || update.message?.voice) await this.handleText(update.message);
   }
 
   private async handleCallback(callbackId: string, data: string): Promise<void> {
-    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|edit|formal|short|friendly|send|cancel)$/.exec(data);
+    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|voice|edit|formal|short|friendly|send|cancel)$/.exec(data);
     if (!match) return;
     const requestedMailId = Number(match[1]);
     const requestedMail = this.store.getMail(requestedMailId);
@@ -364,6 +365,23 @@ export class MailBotApp {
         : `بگویید متن همراه ${isForward ? "فوروارد" : "پاسخ"} چه چیزی را بیان کند؛ AI آن را با متن ایمیل و لحن انتخابی ترکیب می‌کند:`, undefined, false, true);
       this.store.setConversationPrompt(this.config.TELEGRAM_USER_ID, mail.id, prompt.message_id);
       this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
+      return;
+    }
+    if (action === "voice") {
+      if (!this.config.VOICE_REPLY_ENABLED || !this.stt) {
+        await this.editPrimary(mail, "🎙 پاسخ صوتی در تنظیمات سرویس فعال نیست.", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
+        return;
+      }
+      const current = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
+      const existingAuxiliary = mail.telegramMessageIds.slice(1);
+      if (existingAuxiliary.length) await this.telegram.deleteMessages(existingAuxiliary).catch(() => false);
+      const primaryIds = mail.telegramMessageIds.slice(0, 1);
+      this.store.setTelegramMessages(mail.id, primaryIds, mail.telegramCreatedAt);
+      this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "voice_instruction", current?.replyAll ?? false, current?.tone ?? "formal", current?.draft, current?.metadata);
+      const prompt = await this.telegram.sendMessage(`Voice خود را با Reply مستقیم به همین پیام بفرستید. حداکثر ${this.config.VOICE_MAX_SECONDS} ثانیه؛ AI منظور شما را با متن ایمیل و لحن انتخابی ترکیب می‌کند.`, undefined, false, true);
+      this.store.setConversationPrompt(this.config.TELEGRAM_USER_ID, mail.id, prompt.message_id);
+      this.store.setTelegramMessages(mail.id, [...primaryIds, prompt.message_id], mail.telegramCreatedAt);
+      await this.editPrimary(mail, "🎙 منتظر دستور صوتی شما هستم…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
       return;
     }
     if (action === "formal" || action === "short" || action === "friendly") return this.changeTone(mail, action);
@@ -625,15 +643,58 @@ export class MailBotApp {
     }
     const promptMessageId = message.reply_to_message?.message_id;
     const conversation = promptMessageId ? this.store.getConversationByPrompt(this.config.TELEGRAM_USER_ID, promptMessageId) : undefined;
-    if (!conversation || !["instruction", "manual_edit", "forward_recipients", "ai_question"].includes(conversation.mode)) {
+    if (!conversation || !["instruction", "voice_instruction", "manual_edit", "forward_recipients", "ai_question"].includes(conversation.mode)) {
       const active = this.store.getConversation(this.config.TELEGRAM_USER_ID);
-      if (active && ["instruction", "manual_edit", "forward_recipients", "ai_question"].includes(active.mode)) {
-        await this.telegram.sendMessage("برای جلوگیری از انتخاب ایمیل اشتباه، متن را فقط با Reply مستقیم به پیام درخواست ربات ارسال کنید.", undefined, true);
+      if (active && ["instruction", "voice_instruction", "manual_edit", "forward_recipients", "ai_question"].includes(active.mode)) {
+        await this.telegram.sendMessage("برای جلوگیری از انتخاب ایمیل اشتباه، متن یا Voice را فقط با Reply مستقیم به پیام درخواست ربات ارسال کنید.", undefined, true);
       }
       return;
     }
     const mail = this.store.getMail(conversation.mailId);
     if (!mail) return;
+    if (conversation.mode === "voice_instruction") {
+      if (!message.voice) {
+        await this.telegram.sendMessage("لطفاً یک Voice را با Reply مستقیم به پیام درخواست ربات ارسال کنید.", undefined, true);
+        return;
+      }
+      if (message.voice.duration > this.config.VOICE_MAX_SECONDS) {
+        await this.telegram.sendMessage(`❌ Voice از محدودیت ${this.config.VOICE_MAX_SECONDS} ثانیه طولانی‌تر است.`, undefined, true);
+        return;
+      }
+      if ((message.voice.file_size ?? 0) > this.config.VOICE_MAX_BYTES) {
+        await this.telegram.sendMessage("❌ حجم Voice از محدودیت تنظیم‌شده بیشتر است.", undefined, true);
+        return;
+      }
+      if (!this.stt) throw new Error("Speech-to-text service is unavailable");
+      this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, message.message_id], mail.telegramCreatedAt);
+      await this.editPrimary(mail, "🎧 در حال تبدیل Voice به متن و آماده‌سازی پاسخ…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }]]);
+      try {
+        const downloaded = await this.telegram.downloadFile(message.voice.file_id, this.config.VOICE_MAX_BYTES);
+        const extension = downloaded.filePath.split(".").pop()?.replace(/[^a-z0-9]/gi, "") || "ogg";
+        const transcript = await this.stt.transcribe(downloaded.content, `voice.${extension}`);
+        const isForward = conversation.metadata?.kind === "forward";
+        const draft = isForward
+          ? await this.ai.draftForward(mail, transcript, conversation.tone)
+          : await this.ai.draftReply(mail, transcript, conversation.tone, conversation.replyAll, await this.imapFor(mail).findThread(mail));
+        const metadata = { ...(conversation.metadata ?? {}), voiceTranscript: transcript };
+        this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", conversation.replyAll, conversation.tone, draft, metadata);
+        await this.cleanupConversationMessages(mail, message.message_id);
+        if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(metadata), transcript);
+        else await this.showDraft(mail, draft, conversation.replyAll, transcript);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.warn("Voice instruction failed", { mailId: mail.id, error: reason });
+        await this.editPrimary(mail, `❌ تبدیل Voice یا ساخت پاسخ ناموفق بود. Voice ذخیره نشد.\n${esc(reason)}`, [[
+          { text: "🎙 تلاش مجدد", callback_data: `m:${mail.id}:voice`, style: "primary" },
+          { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
+        ]]);
+      }
+      return;
+    }
+    if (!message.text) {
+      await this.telegram.sendMessage("در این مرحله باید متن ارسال کنید.", undefined, true);
+      return;
+    }
     if (conversation.mode === "ai_question") {
       await this.editPrimary(mail, "✨ در حال بررسی ایمیل و آماده‌سازی پاسخ AI…", [[
         { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
@@ -678,8 +739,9 @@ export class MailBotApp {
         : await this.ai.draftReply(mail, message.text!, conversation.tone, conversation.replyAll, await this.imapFor(mail).findThread(mail));
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", conversation.replyAll, conversation.tone, draft, conversation.metadata);
     await this.cleanupConversationMessages(mail, message.message_id);
-    if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(conversation.metadata));
-    else await this.showDraft(mail, draft, conversation.replyAll);
+    const voiceTranscript = this.voiceTranscript(conversation.metadata);
+    if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(conversation.metadata), voiceTranscript);
+    else await this.showDraft(mail, draft, conversation.replyAll, voiceTranscript);
   }
 
   private async extractAttachmentContext(mail: StoredMail): Promise<string> {
@@ -722,15 +784,18 @@ export class MailBotApp {
     ]]);
     const draft = isForward ? await this.ai.draftForward(mail, "", tone) : await this.ai.draftReply(mail, "", tone, current.replyAll, await this.imapFor(mail).findThread(mail));
     this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", current.replyAll, tone, draft, current.metadata);
-    if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(current.metadata));
-    else await this.showDraft(mail, draft, current.replyAll);
+    const voiceTranscript = this.voiceTranscript(current.metadata);
+    if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(current.metadata), voiceTranscript);
+    else await this.showDraft(mail, draft, current.replyAll, voiceTranscript);
     }, 3_000);
   }
 
-  private async showForwardDraft(mail: StoredMail, draft: string, recipients: string[]): Promise<void> {
-    await this.editPrimary(mail, `<b>پیش‌نویس متن همراه فوروارد</b>\n<b>گیرندگان:</b> ${esc(recipients.join(", "))}\n<b>پیوست‌ها:</b> ${mail.attachments.filter((item) => item.isRealAttachment).length}\n\n${esc(draft)}`, [[
+  private async showForwardDraft(mail: StoredMail, draft: string, recipients: string[], voiceTranscript?: string): Promise<void> {
+    await this.editPrimary(mail, `<b>پیش‌نویس متن همراه فوروارد</b>\n<b>گیرندگان:</b> ${esc(recipients.join(", "))}\n<b>پیوست‌ها:</b> ${mail.attachments.filter((item) => item.isRealAttachment).length}${this.renderVoiceTranscript(voiceTranscript)}\n\n<b>متن نهایی:</b>\n${esc(draft)}`, [[
       { text: "✅ ارسال نهایی", callback_data: `m:${mail.id}:send`, style: "success" },
-      { text: "💬 دستور به AI", callback_data: `m:${mail.id}:instruct`, style: "primary" },
+      ...(this.config.VOICE_REPLY_ENABLED ? [{ text: "🎙 دستور صوتی", callback_data: `m:${mail.id}:voice` }] : []),
+      { text: "💬 دستور متنی", callback_data: `m:${mail.id}:instruct`, style: "primary" }
+    ], [
       { text: "✏️ ویرایش مستقیم", callback_data: `m:${mail.id}:edit` },
       { text: "❌ لغو", callback_data: `m:${mail.id}:cancel`, style: "danger" }
     ], [
@@ -750,7 +815,18 @@ export class MailBotApp {
     return recipients;
   }
 
-  private async showDraft(mail: StoredMail, draft: string, replyAll: boolean): Promise<void> {
+  private voiceTranscript(metadata?: Record<string, unknown>): string | undefined {
+    return typeof metadata?.voiceTranscript === "string" ? metadata.voiceTranscript : undefined;
+  }
+
+  private renderVoiceTranscript(transcript?: string): string {
+    if (!transcript) return "";
+    const max = 1_000;
+    const visible = transcript.length > max ? `${transcript.slice(0, max)}…` : transcript;
+    return `\n\n<b>متن استخراج‌شده از Voice:</b>\n${esc(visible)}`;
+  }
+
+  private async showDraft(mail: StoredMail, draft: string, replyAll: boolean, voiceTranscript?: string): Promise<void> {
     const primary = mail.replyTo.length ? mail.replyTo : mail.from;
     const excluded = new Set([...this.ownAddresses().map((address) => address.toLowerCase()), ...primary.map((a) => a.address.toLowerCase())]);
     const seen = new Set<string>();
@@ -760,9 +836,11 @@ export class MailBotApp {
       seen.add(key); return true;
     }) : [];
     const recipients = [...primary, ...copies].map((a) => a.address).join(", ");
-    await this.editPrimary(mail, `<b>پیش‌نویس پاسخ AI</b>\n<b>گیرندگان:</b> ${esc(recipients)}\n\n${esc(draft)}`, [[
+    await this.editPrimary(mail, `<b>پیش‌نویس پاسخ AI</b>\n<b>گیرندگان:</b> ${esc(recipients)}${this.renderVoiceTranscript(voiceTranscript)}\n\n<b>متن نهایی:</b>\n${esc(draft)}`, [[
       { text: "✅ ارسال نهایی", callback_data: `m:${mail.id}:send`, style: "success" },
-      { text: "💬 دستور به AI", callback_data: `m:${mail.id}:instruct`, style: "primary" },
+      ...(this.config.VOICE_REPLY_ENABLED ? [{ text: "🎙 دستور صوتی", callback_data: `m:${mail.id}:voice` }] : []),
+      { text: "💬 دستور متنی", callback_data: `m:${mail.id}:instruct`, style: "primary" }
+    ], [
       { text: "✏️ ویرایش مستقیم", callback_data: `m:${mail.id}:edit` },
       { text: "❌ لغو", callback_data: `m:${mail.id}:cancel`, style: "danger" }
     ], [

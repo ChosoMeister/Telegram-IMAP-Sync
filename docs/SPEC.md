@@ -26,6 +26,7 @@ Keep the user's independent IMAP Inboxes—including Exchange and Gmail—as one
 18. When an owner profile is configured, AI treats its names and addresses as the bot user's identity, labels the action owner, and addresses self-assigned actions directly as `شما` rather than naming the user in third person.
 19. Every mail belongs to one immutable account; all reads, replies, forwards, calendar responses, Sent copies, and Archive moves use that account. IMAP identities and threads never collide across accounts.
 20. Provider-specific folder paths and authentication remain account configuration; Gmail uses App Password authentication and discovered Gmail folder paths without changing account routing semantics.
+21. A Voice instruction is accepted only as a direct reply to the exact mail-scoped ForceReply prompt. Audio is never persisted, transcription has bounded size/duration and ordered fallback, and its result cannot bypass draft review or final send approval.
 
 ## Telegram lifecycle
 
@@ -58,6 +59,7 @@ Keep the user's independent IMAP Inboxes—including Exchange and Gmail—as one
 2. AI creates an initial formal draft using the current message context.
 3. The user may change tone, give an instruction to AI, replace the text directly, regenerate, cancel, or approve.
    The initial draft and subsequent AI rewrites include the discovered thread context.
+   An instruction may be typed or sent as Telegram Voice. Voice is transcribed through the configured ordered ASR models, and the resulting text is displayed alongside the generated draft before approval.
 4. The final screen includes recipients and body.
 5. Approval sends via SMTP with `In-Reply-To` and `References`.
 6. After SMTP success, the state becomes `sent_pending_sentcopy` before the exact RFC822 message is appended to the receiving account's configured Sent mailbox.
