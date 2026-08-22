@@ -61,10 +61,11 @@ const schema = z.object({
   AI_PROXY_API_KEY: z.string().optional(),
   AI_PROXY_MODEL: z.string().default("gpt-oss-120b"),
   AI_PROXY_MODEL_ORDER: z.string().optional(),
+  AI_TRANSCRIPT_MODEL_ORDER: z.string().optional(),
   AI_ENABLED: bool.default(true)
 });
 
-export type AppConfig = z.infer<typeof schema> & { aiProviderOrder: string[]; aiProxyModelOrder: string[]; sttModelOrder: string[] };
+export type AppConfig = z.infer<typeof schema> & { aiProviderOrder: string[]; aiProxyModelOrder: string[]; aiTranscriptModelOrder: string[]; sttModelOrder: string[] };
 type RequiredMailKey = "IMAP_HOST" | "IMAP_USER" | "IMAP_PASSWORD" | "SMTP_HOST" | "SMTP_USER" | "SMTP_PASSWORD" | "SMTP_FROM";
 export type MailAccountAppConfig = Omit<AppConfig, RequiredMailKey> & { [K in RequiredMailKey]-?: Exclude<AppConfig[K], undefined> } & { mailAccountId: string; mailAccountLabel: string };
 
@@ -78,6 +79,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...parsed,
     aiProviderOrder: parsed.AI_PROVIDER_ORDER.split(",").map((v) => v.trim()).filter(Boolean),
     aiProxyModelOrder: (parsed.AI_PROXY_MODEL_ORDER || parsed.AI_PROXY_MODEL).split(",").map((v) => v.trim()).filter(Boolean),
+    aiTranscriptModelOrder: (parsed.AI_TRANSCRIPT_MODEL_ORDER || parsed.AI_PROXY_MODEL_ORDER || parsed.AI_PROXY_MODEL).split(",").map((v) => v.trim()).filter(Boolean),
     sttModelOrder: parsed.STT_MODEL_ORDER.split(",").map((v) => v.trim()).filter(Boolean)
   };
 }

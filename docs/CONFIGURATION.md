@@ -109,6 +109,7 @@ Voice is an instruction to the drafting model, not an automatic outbound message
 | `AI_PROXY_API_KEY` | unset | Proxy bearer key. |
 | `AI_PROXY_MODEL` | `gpt-oss-120b` | Proxy model name. |
 | `AI_PROXY_MODEL_ORDER` | value of `AI_PROXY_MODEL` | Ordered models on the same proxy; for example `gpt-oss-120b,gemma4-26b`. |
+| `AI_TRANSCRIPT_MODEL_ORDER` | value of `AI_PROXY_MODEL_ORDER` | Transcript-only preference; `gemma4-26b,gpt-oss-120b` gives fast Voice adjudication with a quality fallback without changing normal email AI order. |
 
 Unknown providers in `AI_PROVIDER_ORDER` are ignored. A `proxy` entry expands to every model in `AI_PROXY_MODEL_ORDER`; timeout, HTTP failure, invalid JSON, or schema failure advances to the next model. If all models/providers fail, Telegram receives the usable email card without AI enrichment.
 

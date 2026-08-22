@@ -13,7 +13,7 @@ export const config: MailAccountAppConfig = {
   STT_MODEL_ORDER: "local-qwen3-asr-1.7b,local-whisper-large-v3", STT_LANGUAGE: "auto", STT_TIMEOUT_MS: 90_000,
   AI_PROVIDER_ORDER: "ollama,proxy", AI_TIMEOUT_MS: 1000, AI_CONTEXT_MAX_CHARS: 60_000, AI_ATTACHMENT_MAX_BYTES: 10_000_000, OLLAMA_BASE_URL: "http://localhost:11434", OLLAMA_MODEL: "test",
   AI_PROXY_MODEL: "test", AI_ENABLED: true,
-  aiProviderOrder: ["ollama", "proxy"], aiProxyModelOrder: ["test"], sttModelOrder: ["local-qwen3-asr-1.7b", "local-whisper-large-v3"]
+  aiProviderOrder: ["ollama", "proxy"], aiProxyModelOrder: ["test"], aiTranscriptModelOrder: ["test"], sttModelOrder: ["local-qwen3-asr-1.7b", "local-whisper-large-v3"]
 };
 
 export const incoming: IncomingMail = {

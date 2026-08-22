@@ -26,6 +26,7 @@
 - All Inbox چند میل‌سرور در همان ربات؛ پاسخ، فوروارد، RSVP، ذخیره Sent و Archive همیشه با حساب دریافت‌کننده انجام می‌شود
 - پشتیبانی از Gmail و Google Workspace با IMAP/SMTP و App Password؛ پاسخ و نسخه Sent با همان حساب دریافت‌کننده انجام می‌شود
 - زنجیره fallback چند مدل روی همان AI Proxy سازمانی، با سلامت جداگانه هر مدل
+- ترتیب مستقل مدل داور Voice برای پاسخ سریع‌تر، بدون تغییر اولویت مدل تحلیل و نگارش ایمیل
 - قفل اتمیک عملیات، migration نسخه‌دار و صف پایدار تحلیل AI
 - حذف خودکار کارت ایمیلی که خارج از ربات از Inbox منتقل شده است، پس از دو بار تأیید
 - reconnect خودکار IMAP، health endpoint، backup آنلاین SQLite و Docker چندسکویی
@@ -55,4 +56,4 @@ docker compose logs -f --tail 100
 - [راه‌اندازی Gmail و Google Workspace](docs/GMAIL.md)
 - [چک‌لیست نگهداری مستندات و انتشار](docs/MAINTENANCE.md)
 
-وضعیت سرویس روی `http://127.0.0.1:18080/` است و هنگام قطع IMAP هر حساب یا توقف موفق Poll تلگرام برای بیش از دو دقیقه کد `503` می‌دهد. پاسخ health اتصال، Inbox، Sync و SMTP هر حساب را جداگانه و وضعیت Telegram، AI، STT، backup و صف را یکجا نشان می‌دهد. دستور `/status` نیز خلاصه هر حساب را نمایش می‌دهد. تصویرهای `amd64` و `arm64` با tagهای `latest`، نسخه `0.11.0` و commit در `ghcr.io/chosomeister/telegram-imap-sync` منتشر می‌شوند.
+وضعیت سرویس روی `http://127.0.0.1:18080/` است و هنگام قطع IMAP هر حساب یا توقف موفق Poll تلگرام برای بیش از دو دقیقه کد `503` می‌دهد. پاسخ health اتصال، Inbox، Sync و SMTP هر حساب را جداگانه و وضعیت Telegram، AI، STT، backup و صف را یکجا نشان می‌دهد. دستور `/status` نیز خلاصه هر حساب را نمایش می‌دهد. تصویرهای `amd64` و `arm64` با tagهای `latest`، نسخه `0.11.1` و commit در `ghcr.io/chosomeister/telegram-imap-sync` منتشر می‌شوند.

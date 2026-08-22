@@ -32,6 +32,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Multi-server All Inbox through one Telegram bot, with every reply, forward, RSVP, Sent copy, and Archive action routed through the receiving account
 - Gmail and Google Workspace accounts through IMAP/SMTP with an App Password and account-scoped Reply, Sent, and Archive routing
 - Ordered fallback across multiple models on the same organizational AI proxy
+- Independent transcript-judge model preference for fast mixed-language Voice consensus without changing normal email analysis quality
 - Optional local mail-rule engine for Exchange folder routing before Telegram delivery
 - Exact sent-copy storage in Exchange Sent after SMTP acceptance
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
@@ -79,7 +80,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.11.0
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.11.1
 ```
 
 ## Windows installation (Docker Desktop)

@@ -91,4 +91,24 @@ describe("AI analysis normalization", () => {
     expect(request.messages[0].content).toContain("Never add an action");
     fetchMock.mockRestore();
   });
+  it("uses the transcript-specific fast model order without changing the regular AI order", async () => {
+    const models: string[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      models.push(JSON.parse(String(init?.body)).model);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+        finalTranscript: "از این پس اکانتشان را تمدید کنند", confidence: 0.9, uncertainTerms: [], rationale: "تطبیق آوایی"
+      }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const service = new AiService({
+      ...config, AI_ENABLED: true, AI_PROVIDER_ORDER: "proxy", aiProviderOrder: ["proxy"],
+      AI_PROXY_BASE_URL: "https://ai.example.test/v1", AI_PROXY_API_KEY: "test", AI_PROXY_MODEL: "quality",
+      AI_PROXY_MODEL_ORDER: "quality,fast", aiProxyModelOrder: ["quality", "fast"],
+      AI_TRANSCRIPT_MODEL_ORDER: "fast,quality", aiTranscriptModelOrder: ["fast", "quality"]
+    }, new Logger("error"));
+    await service.reconcileVoiceTranscript({ ...incoming, id: 1, state: "pending", telegramMessageIds: [] }, [
+      { model: "qwen", text: "زینپس کنتشون" }, { model: "whisper", text: "زیمپس کنتشون" }
+    ]);
+    expect(models).toEqual(["fast"]);
+    fetchMock.mockRestore();
+  });
 });

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.11.1 - 2026-08-22
+
+- Prefer a configurable fast transcript judge independently from the regular email AI order, bound adjudication context to 8K characters, and improve conservative phonetic recovery for mixed Persian-English speech.
+
 ## 0.11.0 - 2026-08-22
 
 - Replace first-success ASR fallback with parallel Qwen3-ASR and Whisper transcription for every Voice instruction; one failing model no longer prevents review of the healthy result.
