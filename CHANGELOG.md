@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.11.0 - 2026-08-22
+
+- Replace first-success ASR fallback with parallel Qwen3-ASR and Whisper transcription for every Voice instruction; one failing model no longer prevents review of the healthy result.
+- Default Voice language detection to automatic so mixed Persian-English speech can preserve supported Latin terms such as `unsubscribe`.
+- Add conservative, email-context-aware AI adjudication with confidence and uncertain-term reporting while forbidding invention from email context.
+- Require a separate transcript approval before drafting and add Telegram controls for correction, re-recording, and inspecting both raw model outputs.
+- Keep source audio ephemeral and preserve the existing account-scoped Reply, Reply All, Forward, Sent, Archive, and final-send approval guarantees.
+
 ## 0.10.0 - 2026-08-22
 
 - Document Gmail and Google Workspace as supported independent accounts using IMAP/SMTP, Google App Passwords, discovered folder paths, and the existing account-scoped All Inbox routing.

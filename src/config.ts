@@ -48,7 +48,7 @@ const schema = z.object({
   STT_BASE_URL: z.string().url().optional(),
   STT_API_KEY: z.string().optional(),
   STT_MODEL_ORDER: z.string().default("local-qwen3-asr-1.7b,local-whisper-large-v3"),
-  STT_LANGUAGE: z.string().min(2).max(16).default("fa"),
+  STT_LANGUAGE: z.string().min(2).max(16).default("auto"),
   STT_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(300_000).default(90_000),
 
   AI_PROVIDER_ORDER: z.string().default("ollama,proxy"),

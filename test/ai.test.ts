@@ -71,4 +71,24 @@ describe("AI analysis normalization", () => {
     expect(models).toEqual(["primary", "fallback"]);
     fetchMock.mockRestore();
   });
+  it("adjudicates Persian-English ASR candidates without transliterating supported English terms", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        finalTranscript: "به ایشان بگو Unsubscribe را انجام دهد", confidence: 0.93, uncertainTerms: [], rationale: "Whisper واژه انگلیسی را واضح ثبت کرده است."
+      }) } }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const service = new AiService({
+      ...config, AI_ENABLED: true, AI_PROVIDER_ORDER: "proxy", aiProviderOrder: ["proxy"],
+      AI_PROXY_BASE_URL: "https://ai.example.test/v1", AI_PROXY_API_KEY: "test", AI_PROXY_MODEL: "test"
+    }, new Logger("error"));
+    const result = await service.reconcileVoiceTranscript(
+      { ...incoming, id: 1, state: "pending", telegramMessageIds: [] },
+      [{ model: "qwen", text: "بهش بگو آن سابسکرایب را انجام بده" }, { model: "whisper", text: "بهش بگو Unsubscribe را انجام بده" }]
+    );
+    expect(result).toMatchObject({ finalTranscript: "به ایشان بگو Unsubscribe را انجام دهد", confidence: 0.93, provider: "proxy:test" });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(request.messages[0].content).toContain("Preserve English words in Latin script");
+    expect(request.messages[0].content).toContain("Never add an action");
+    fetchMock.mockRestore();
+  });
 });

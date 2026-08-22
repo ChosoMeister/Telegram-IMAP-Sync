@@ -23,9 +23,11 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
   };
   const ai = {
     analyze: vi.fn().mockResolvedValue(undefined), ask: vi.fn().mockResolvedValue("پاسخ آزمایشی"),
-    draftReply: vi.fn().mockResolvedValue("پیش‌نویس صوتی"), draftForward: vi.fn().mockResolvedValue("متن فوروارد"), status: vi.fn().mockReturnValue({})
+    draftReply: vi.fn().mockResolvedValue("پیش‌نویس صوتی"), draftForward: vi.fn().mockResolvedValue("متن فوروارد"),
+    reconcileVoiceTranscript: vi.fn().mockResolvedValue({ finalTranscript: "به ایشان بگو unsubscribe را انجام می‌دهم", confidence: 0.92, uncertainTerms: [], rationale: "توافق دو مدل" }),
+    status: vi.fn().mockReturnValue({})
   };
-  const stt = { transcribe: vi.fn().mockResolvedValue("به ایشان بگو تا فردا انجام می‌شود"), status: vi.fn().mockReturnValue({ ok: true }) };
+  const stt = { transcribe: vi.fn().mockResolvedValue({ candidates: [{ model: "qwen", text: "آن سابسکرایب" }, { model: "whisper", text: "unsubscribe" }], failedModels: [] }), status: vi.fn().mockReturnValue({ ok: true }) };
   const smtp = { status: vi.fn().mockReturnValue({}), verify: vi.fn().mockResolvedValue(undefined), buildReply: vi.fn().mockResolvedValue(Buffer.from("raw")), buildCalendarResponse: vi.fn().mockResolvedValue({ raw: Buffer.from("calendar-raw"), organizer: "organizer@example.com" }), sendRaw: vi.fn().mockResolvedValue(undefined) };
   const app = new MailBotApp(isolatedConfig, store, imap as any, smtp as any, telegram as any, ai as any, new Logger("error"), undefined, [], stt as any);
   return { app, store, telegram, imap, smtp, ai, stt, archive, id };
@@ -291,7 +293,7 @@ describe("single-card navigation", () => {
     s.store.close();
   });
 
-  it("binds a voice instruction to its exact mail and builds a review draft", async () => {
+  it("binds Voice to its exact mail and requires transcript approval before drafting", async () => {
     const s = setup();
     (s.app as any).config.VOICE_REPLY_ENABLED = true;
     s.store.setConversation(42, s.id, "voice_instruction", false, "formal", "old draft", undefined, 501);
@@ -301,11 +303,32 @@ describe("single-card navigation", () => {
     });
     expect(s.telegram.downloadFile).toHaveBeenCalledWith("voice-file", 10_000_000);
     expect(s.stt.transcribe).toHaveBeenCalledWith(Buffer.from("voice"), "voice.ogg");
+    expect(s.ai.reconcileVoiceTranscript).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), expect.arrayContaining([
+      { model: "qwen", text: "آن سابسکرایب" }, { model: "whisper", text: "unsubscribe" }
+    ]));
+    expect(s.ai.draftReply).not.toHaveBeenCalled();
+    expect(s.store.getConversation(42, s.id)).toMatchObject({ mode: "voice_review", metadata: { voiceTranscript: "به ایشان بگو unsubscribe را انجام می‌دهم" } });
+    expect(s.telegram.editMessage).toHaveBeenLastCalledWith(100, expect.stringContaining("بازبینی متن Voice"), expect.any(Array));
+
+    await (s.app as any).handleCallback("cb-confirm", `m:${s.id}:voiceconfirm`);
     expect(s.ai.draftReply).toHaveBeenCalledWith(
-      expect.objectContaining({ id: s.id }), "به ایشان بگو تا فردا انجام می‌شود", "formal", false, [incoming]
+      expect.objectContaining({ id: s.id }), "به ایشان بگو unsubscribe را انجام می‌دهم", "formal", false, [incoming]
     );
     expect(s.store.getConversation(42, s.id)).toMatchObject({ mode: "review", draft: "پیش‌نویس صوتی" });
-    expect(s.telegram.editMessage).toHaveBeenLastCalledWith(100, expect.stringContaining("متن استخراج‌شده از Voice"), expect.any(Array));
+    s.store.close();
+  });
+
+  it("shows both raw ASR outputs and accepts a manual transcript correction", async () => {
+    const s = setup();
+    s.store.setConversation(42, s.id, "voice_review", false, "formal", undefined, {
+      voiceTranscript: "unsubscribe را انجام بده", voiceCandidates: [{ model: "qwen", text: "آن سابسکرایب" }, { model: "whisper", text: "unsubscribe" }],
+      voiceConsensus: { finalTranscript: "unsubscribe را انجام بده", confidence: 0.7, uncertainTerms: ["unsubscribe"], rationale: "اختلاف" }
+    });
+    await (s.app as any).handleCallback("cb-raw", `m:${s.id}:voiceraw`);
+    expect(s.telegram.editMessage).toHaveBeenLastCalledWith(100, expect.stringContaining("<b>whisper:</b>"), expect.any(Array));
+    await (s.app as any).handleCallback("cb-edit", `m:${s.id}:voiceedit`);
+    await (s.app as any).handleText({ message_id: 610, chat: { id: 42 }, reply_to_message: { message_id: 200 }, text: "به ایشان بگو Unsubscribe را انجام دهد", from: { id: 42 } });
+    expect(s.store.getConversation(42, s.id)).toMatchObject({ mode: "voice_review", metadata: { voiceTranscript: "به ایشان بگو Unsubscribe را انجام دهد" } });
     s.store.close();
   });
 

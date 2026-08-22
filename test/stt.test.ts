@@ -14,7 +14,7 @@ describe("SpeechToTextService", () => {
     })).toThrow("requires STT_BASE_URL and STT_API_KEY");
   });
 
-  it("falls back to the next model and returns a trimmed transcript", async () => {
+  it("runs all models in parallel and keeps every successful transcript", async () => {
     const requests: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
       const model = (init?.body as FormData).get("model") as string;
@@ -27,9 +27,27 @@ describe("SpeechToTextService", () => {
       ...config, VOICE_REPLY_ENABLED: true, STT_BASE_URL: "https://stt.example/v1", STT_API_KEY: "secret",
       STT_MODEL_ORDER: "qwen,whisper", sttModelOrder: ["qwen", "whisper"]
     }, new Logger("error"));
-    await expect(service.transcribe(Buffer.from("audio"), "voice.ogg")).resolves.toBe("متن صحیح فارسی");
-    expect(requests).toEqual(["qwen", "whisper"]);
-    expect(service.status()).toMatchObject({ ok: true, model: "whisper" });
+    await expect(service.transcribe(Buffer.from("audio"), "voice.ogg")).resolves.toEqual({
+      candidates: [{ model: "whisper", text: "متن صحیح فارسی" }],
+      failedModels: [{ model: "qwen", error: "STT HTTP 503" }]
+    });
+    expect(requests.sort()).toEqual(["qwen", "whisper"]);
+    expect(service.status()).toMatchObject({ ok: true, models: ["whisper"], failedModels: ["qwen"] });
+  });
+
+  it("omits the language field in automatic code-switching mode", async () => {
+    const forms: FormData[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      forms.push(init?.body as FormData);
+      return new Response('{"text":"unsubscribe را انجام بده"}', { status: 200 });
+    }));
+    const service = new SpeechToTextService({
+      ...config, VOICE_REPLY_ENABLED: true, STT_BASE_URL: "https://stt.example/v1", STT_API_KEY: "secret",
+      STT_MODEL_ORDER: "qwen,whisper", sttModelOrder: ["qwen", "whisper"], STT_LANGUAGE: "auto"
+    }, new Logger("error"));
+    const result = await service.transcribe(Buffer.from("audio"));
+    expect(result.candidates).toHaveLength(2);
+    expect(forms.every((form) => form.get("language") === null)).toBe(true);
   });
 
   it("rejects audio beyond the configured limit before calling the proxy", async () => {

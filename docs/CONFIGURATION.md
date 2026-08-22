@@ -86,13 +86,13 @@ Port `587` with `SMTP_SECURE=false` is the STARTTLS alternative. Folder names ab
 | `VOICE_KEEP_AUDIO` | `false` | Must remain `false`. Audio is held in memory only and is never persisted by the application. |
 | `STT_BASE_URL` | required when Voice is enabled | OpenAI-compatible base URL ending in `/v1`; the application calls `/audio/transcriptions`. |
 | `STT_API_KEY` | required when Voice is enabled | Bearer key for the transcription endpoint. Keep it only in the ignored production `.env`. |
-| `STT_MODEL_ORDER` | Qwen, then Whisper | Ordered model fallback, for example `local-qwen3-asr-1.7b,local-whisper-large-v3`. |
-| `STT_LANGUAGE` | `fa` | Language hint passed to every transcription request. |
-| `STT_TIMEOUT_MS` | `90000` | Independent timeout for each ASR model; range 1–300 seconds. |
+| `STT_MODEL_ORDER` | Qwen and Whisper | Models run concurrently for consensus, for example `local-qwen3-asr-1.7b,local-whisper-large-v3`. A healthy single result remains usable if its peer fails. |
+| `STT_LANGUAGE` | `auto` | `auto` omits the language hint for Persian-English code switching. Set an explicit language only for a truly monolingual deployment. |
+| `STT_TIMEOUT_MS` | `90000` | Independent concurrent timeout for each ASR model; range 1–300 seconds. |
 
-The bot accepts Voice only as a direct Telegram Reply to the exact ForceReply prompt opened for one mail. It checks duration and declared size before download, downloads the OGG/Opus payload from Telegram, and sends it as multipart form data to each configured model until one returns a non-empty JSON `text`. Timeout, network failure, non-2xx status, invalid JSON, or empty text advances to the next model. The transcript is shown with the AI draft and stored only as conversation text; the audio buffer is released after the update handler completes.
+The bot accepts Voice only as a direct Telegram Reply to the exact ForceReply prompt opened for one mail. It checks duration and declared size before download, downloads the OGG/Opus payload from Telegram, and sends the same in-memory audio concurrently to every configured model. Successful raw outputs go to a conservative AI adjudicator with bounded email context. Context may resolve spelling but cannot introduce actions or facts absent from the ASR evidence. The review shows confidence and uncertain terms; controls allow approval, manual correction, re-recording, and raw-output inspection. A draft is not generated until transcript approval. The audio buffer is released after the update handler completes.
 
-Voice is an instruction to the drafting model, not an automatic outbound message. The transcript, current mail/thread, selected Reply/Reply All/Forward operation, owner profile, and chosen tone produce a normal review draft. SMTP remains impossible until the user explicitly presses final approval.
+Voice is an instruction to the drafting model, not an automatic outbound message. Transcript approval and outbound draft approval are separate gates. After transcript approval, the corrected text, current mail/thread, selected Reply/Reply All/Forward operation, owner profile, and chosen tone produce a normal review draft. SMTP remains impossible until the user explicitly presses final approval.
 
 ## AI
 
