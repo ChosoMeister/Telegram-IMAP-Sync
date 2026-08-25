@@ -105,4 +105,14 @@ describe("Store", () => {
     store.enqueueJob("analyze", id);
     expect(store.leaseJob()).toMatchObject({ id: job.id, attempts: 2 });
   });
+  it("immediately resets a failed analysis when the user requests retry", () => {
+    const { id } = store.upsertMail(incoming);
+    store.setAnalysis(id, { importance: "normal", score: 0, summaryFa: "failed", suggestedAction: "retry", reason: "outage", provider: "unavailable" });
+    store.enqueueJob("analyze", id);
+    const job = store.leaseJob()!;
+    store.failJob(job.id, "provider unavailable", 60_000, true);
+    expect(store.retryAnalysis(id)).toBe(true);
+    expect(store.getMail(id)?.analysis).toBeUndefined();
+    expect(store.leaseJob()).toMatchObject({ id: job.id, attempts: 1 });
+  });
 });

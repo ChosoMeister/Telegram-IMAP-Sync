@@ -350,6 +350,22 @@ export class Store {
       .run(JSON.stringify(analysis), id);
   }
 
+  retryAnalysis(id: number): boolean {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE mails SET analysis_json=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id);
+      const result = this.db.prepare(`UPDATE jobs SET state='queued',attempts=0,available_at=0,lease_until=NULL,last_error=NULL,updated_at=CURRENT_TIMESTAMP
+        WHERE kind='analyze' AND mail_id=? AND state!='running'`).run(id);
+      if (result.changes === 0) this.db.prepare("INSERT OR IGNORE INTO jobs(kind,mail_id,payload_json) VALUES('analyze',?,'{}')").run(id);
+      const queued = Boolean(this.db.prepare("SELECT 1 FROM jobs WHERE kind='analyze' AND mail_id=? AND state='queued'").get(id));
+      this.db.exec("COMMIT");
+      return queued;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   setTelegramMessages(id: number, ids: number[], createdAt = new Date()): void {
     this.db.prepare("UPDATE mails SET telegram_ids_json=?,telegram_created_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
       .run(JSON.stringify(ids), createdAt.toISOString(), id);

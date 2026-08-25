@@ -34,6 +34,19 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
 }
 
 describe("Done transaction", () => {
+  it("immediately retries a failed AI analysis from its Telegram button", async () => {
+    const s = setup();
+    s.store.setAnalysis(s.id, { importance: "normal", score: 0, summaryFa: "failed", suggestedAction: "retry", reason: "outage", provider: "unavailable" });
+    s.store.enqueueJob("analyze", s.id);
+    const job = s.store.leaseJob()!;
+    s.store.failJob(job.id, "provider unavailable", 60_000, true);
+    s.ai.analyze.mockResolvedValueOnce({ importance: "high", score: 80, summaryFa: "خلاصه", suggestedAction: "بررسی کنید", reason: "درخواست", provider: "proxy:test" });
+    await (s.app as any).handleCallback("retry", `m:${s.id}:retryai`);
+    expect(s.ai.analyze).toHaveBeenCalledOnce();
+    expect(s.store.getMail(s.id)?.analysis?.provider).toBe("proxy:test");
+    expect(s.store.jobCounts()).toMatchObject({ complete: 1 });
+    s.store.close();
+  });
   it("archives before deleting Telegram messages", async () => {
     const s = setup();
     (s.app as any).config.APP_MODE = "live";

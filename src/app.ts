@@ -201,8 +201,8 @@ export class MailBotApp {
             if (mail) {
               this.store.setAnalysis(mail.id, {
                 importance: "normal", score: 0,
-                summaryFa: "تحلیل هوشمند این ایمیل موقتاً در دسترس نیست.",
-                suggestedAction: "متن ایمیل را بررسی کنید؛ پس از بازیابی سرویس AI، تحلیل همین کارت خودکار تکمیل می‌شود.",
+                summaryFa: "تحلیل هوشمند این ایمیل پس از چند تلاش ناموفق بود.",
+                suggestedAction: "متن ایمیل را بررسی کنید یا دکمه «تلاش مجدد تحلیل» را بزنید.",
                 reason: message, provider: "unavailable", actionOwner: "unknown"
               });
               const representative = this.store.threadRepresentative(mail.id);
@@ -337,7 +337,7 @@ export class MailBotApp {
   }
 
   private async handleCallback(callbackId: string, data: string): Promise<void> {
-    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|voice|voiceconfirm|voiceedit|voiceraw|voiceclean|edit|formal|short|friendly|send|cancel)$/.exec(data);
+    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|retryai|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|voice|voiceconfirm|voiceedit|voiceraw|voiceclean|edit|formal|short|friendly|send|cancel)$/.exec(data);
     if (!match) return;
     const requestedMailId = Number(match[1]);
     const requestedMail = this.store.getMail(requestedMailId);
@@ -366,6 +366,7 @@ export class MailBotApp {
     if (action === "thread") return this.showAllBodies(mail, 0);
     if (action === "ask") return this.chooseAiContext(mail);
     if (action === "askmail" || action === "askfiles" || action === "askthread") return this.startAiQuestion(mail, action === "askthread" ? "thread" : action === "askfiles" ? "attachments" : "mail");
+    if (action === "retryai") return this.retryAnalysis(mail);
     if (action === "done") return this.done(mail);
     if (action?.startsWith("calaccept") || action?.startsWith("caltentative") || action?.startsWith("caldecline")) {
       const response: CalendarResponse = action.startsWith("calaccept") ? "accept" : action.startsWith("caltentative") ? "tentative" : "decline";
@@ -432,6 +433,14 @@ export class MailBotApp {
       }
       throw error;
     }
+  }
+
+  private async retryAnalysis(mail: StoredMail): Promise<void> {
+    if (mail.analysis?.provider !== "unavailable" || !this.store.retryAnalysis(mail.id)) return this.showSummary(mail);
+    const refreshed = this.store.getMail(mail.id)!;
+    const thread = this.store.threadMembers(refreshed.id);
+    await this.editPrimary(refreshed, renderMail(refreshed, thread), mailButtons(refreshed, thread));
+    await this.processJobs();
   }
 
   private async showBody(mail: StoredMail, requestedPage = 0): Promise<void> {

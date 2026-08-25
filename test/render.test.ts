@@ -6,12 +6,13 @@ import { incoming } from "./helpers.js";
 const stored = (id: number): StoredMail => ({ ...incoming, id, state: "pending", telegramMessageIds: [] });
 
 describe("mail card buttons", () => {
-  it("shows a clear temporary AI outage instead of a permanent waiting state", () => {
+  it("shows a clear AI failure with a retry button instead of a permanent waiting state", () => {
     const mail = stored(1);
     mail.analysis = { importance: "normal", score: 0, summaryFa: "موقتاً در دسترس نیست.", suggestedAction: "متن را بررسی کنید.", reason: "outage", provider: "unavailable" };
     const rendered = renderMail(mail);
-    expect(rendered).toContain("AI موقتاً در دسترس نیست");
+    expect(rendered).toContain("تحلیل AI شکست خورد");
     expect(rendered).not.toContain("0/100");
+    expect(mailButtons(mail).flat().map((button) => button.text)).toContain("🔄 تلاش مجدد تحلیل");
   });
   it("does not show the redundant all-messages action for a single message", () => {
     const mail = stored(1);

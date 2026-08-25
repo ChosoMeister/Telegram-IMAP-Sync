@@ -5,6 +5,7 @@
 - Update the proxy defaults and examples to the deployed `local-gpt-oss-120b` and `local-gemma4-26b` model names.
 - Keep email cards usable during a full AI outage, show an explicit temporary-unavailable state after bounded retries, and automatically retry failed analysis after cooldown.
 - Include bounded upstream HTTP error details in AI diagnostics without logging credentials or email content.
+- Show an explicit failed-analysis state with a Telegram button that immediately resets and retries the durable AI job.
 
 ## 0.11.2 - 2026-08-22
 

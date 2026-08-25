@@ -17,7 +17,7 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
     return `${direction} <b>${index + 1}. ${esc(sender)}</b> — ${esc(formatDate(item.receivedAt))}\n${esc(summary)}`;
   }).join("\n\n") : "";
   return [
-    `${aiUnavailable ? "⚪️" : a ? badge[a.importance] : "⚪️"} <b>${aiUnavailable ? "AI موقتاً در دسترس نیست" : a ? `${importanceFa(a.importance)} — ${a.score}/100` : "در انتظار تحلیل AI"}</b>`,
+    `${aiUnavailable ? "⚪️" : a ? badge[a.importance] : "⚪️"} <b>${aiUnavailable ? "تحلیل AI شکست خورد" : a ? `${importanceFa(a.importance)} — ${a.score}/100` : "در انتظار تحلیل AI"}</b>`,
     ``,
     thread.length > 1 ? `<b>🧵 مکالمه:</b> ${thread.length} پیام در Inbox` : "",
     mail.accountLabel ? `<b>حساب:</b> ${esc(mail.accountLabel)}` : "",
@@ -34,6 +34,7 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
 
 export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
   const id = mail.id;
+  const aiUnavailable = mail.analysis?.provider === "unavailable";
   type Button = { text: string; callback_data: string; style?: "danger" | "success" | "primary" };
   if (mail.calendar) {
     const calendarRows: Button[][] = [];
@@ -69,6 +70,7 @@ export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
   const hiddenCount = thread.reduce((count, item) => count + item.attachments.filter((attachment) => !attachment.isRealAttachment && attachment.classification !== "calendar").length, 0);
   if (realCount) rows.push([{ text: `📎 پیوست‌ها (${realCount})`, callback_data: `m:${id}:files` }]);
   if (hiddenCount) rows.push([{ text: `🖼 موارد مخفی (${hiddenCount})`, callback_data: `m:${id}:hidden` }]);
+  if (aiUnavailable) rows.push([{ text: "🔄 تلاش مجدد تحلیل", callback_data: `m:${id}:retryai`, style: "primary" }]);
   return rows;
 }
 
