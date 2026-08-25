@@ -128,7 +128,7 @@ export class MailBotApp {
       }
       await this.cleanupNonActionableCards();
       await this.normalizePendingThreadCards(silent);
-      const analysisTargets = this.store.listPending().filter((mail) => !mail.analysis);
+      const analysisTargets = this.store.listPending().filter((mail) => !mail.analysis || mail.analysis.provider === "unavailable");
       for (const mail of analysisTargets) this.store.enqueueJob("analyze", mail.id);
       void this.processJobs();
     } finally { this.syncRunning = false; }
@@ -182,7 +182,7 @@ export class MailBotApp {
         if (!job) break;
         try {
           const mail = this.store.getMail(job.mailId);
-          if (!mail || mail.analysis || mail.state === "done" || mail.state === "external_done") {
+          if (!mail || (mail.analysis && mail.analysis.provider !== "unavailable") || mail.state === "done" || mail.state === "external_done") {
             this.store.completeJob(job.id); continue;
           }
           if (job.kind !== "analyze") throw new Error(`Unsupported job kind: ${job.kind}`);
@@ -195,7 +195,23 @@ export class MailBotApp {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const terminal = job.attempts >= 5;
-          this.store.failJob(job.id, message, Math.min(60_000 * (2 ** Math.max(0, job.attempts - 1)), 3_600_000), terminal);
+          const retryMs = Math.min(60_000 * (2 ** Math.max(0, job.attempts - 1)), 3_600_000);
+          if (terminal) {
+            const mail = this.store.getMail(job.mailId);
+            if (mail) {
+              this.store.setAnalysis(mail.id, {
+                importance: "normal", score: 0,
+                summaryFa: "تحلیل هوشمند این ایمیل موقتاً در دسترس نیست.",
+                suggestedAction: "متن ایمیل را بررسی کنید؛ پس از بازیابی سرویس AI، تحلیل همین کارت خودکار تکمیل می‌شود.",
+                reason: message, provider: "unavailable", actionOwner: "unknown"
+              });
+              const representative = this.store.threadRepresentative(mail.id);
+              if (representative) await this.enrichTelegram(representative).catch((renderError) =>
+                this.logger.warn("Could not render AI-unavailable state", { mailId: mail.id, error: describeError(renderError) })
+              );
+            }
+          }
+          this.store.failJob(job.id, message, retryMs, terminal);
           this.logger.warn("Durable job failed", { jobId: job.id, kind: job.kind, mailId: job.mailId, attempts: job.attempts, terminal, error: message });
         }
       }

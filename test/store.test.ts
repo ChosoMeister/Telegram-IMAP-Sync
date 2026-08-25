@@ -94,4 +94,15 @@ describe("Store", () => {
     store.completeJob(job!.id);
     expect(store.jobCounts()).toMatchObject({ complete: 1 });
   });
+  it("revives terminal jobs only after their retry delay", () => {
+    const { id } = store.upsertMail(incoming);
+    store.enqueueJob("analyze", id);
+    const job = store.leaseJob()!;
+    store.failJob(job.id, "provider unavailable", 60_000, true);
+    store.enqueueJob("analyze", id);
+    expect(store.leaseJob()).toBeUndefined();
+    store.failJob(job.id, "provider unavailable", 0, true);
+    store.enqueueJob("analyze", id);
+    expect(store.leaseJob()).toMatchObject({ id: job.id, attempts: 2 });
+  });
 });

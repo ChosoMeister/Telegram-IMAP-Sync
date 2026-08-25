@@ -198,10 +198,19 @@ export class Store {
   }
 
   enqueueJob(kind: string, mailId: number, payload: Record<string, unknown> = {}): void {
+    const now = Date.now();
     this.db.prepare(`INSERT INTO jobs(kind,mail_id,payload_json) VALUES(?,?,?)
-      ON CONFLICT(kind,mail_id) DO UPDATE SET state=CASE WHEN jobs.state IN ('complete','failed') THEN jobs.state ELSE 'queued' END,
-      payload_json=excluded.payload_json,available_at=0,updated_at=CURRENT_TIMESTAMP`)
-      .run(kind, mailId, JSON.stringify(payload));
+      ON CONFLICT(kind,mail_id) DO UPDATE SET
+      state=CASE
+        WHEN jobs.state='complete' THEN jobs.state
+        WHEN jobs.state='failed' AND jobs.available_at<=? THEN 'queued'
+        WHEN jobs.state='failed' THEN jobs.state
+        ELSE 'queued'
+      END,
+      payload_json=excluded.payload_json,
+      available_at=CASE WHEN jobs.state='failed' THEN jobs.available_at ELSE 0 END,
+      updated_at=CURRENT_TIMESTAMP`)
+      .run(kind, mailId, JSON.stringify(payload), now);
   }
 
   leaseJob(leaseMs = 120_000): DurableJob | undefined {

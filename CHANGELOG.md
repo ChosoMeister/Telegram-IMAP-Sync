@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Update the proxy defaults and examples to the deployed `local-gpt-oss-120b` and `local-gemma4-26b` model names.
+- Keep email cards usable during a full AI outage, show an explicit temporary-unavailable state after bounded retries, and automatically retry failed analysis after cooldown.
+- Include bounded upstream HTTP error details in AI diagnostics without logging credentials or email content.
+
 ## 0.11.2 - 2026-08-22
 
 - Distinguish `subscribe` from `unsubscribe` per local spoken context, resolve supported participant names without forcing Latin output, and add content-free per-model/judge timing telemetry for Voice diagnostics.

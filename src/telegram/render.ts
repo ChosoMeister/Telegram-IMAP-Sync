@@ -6,6 +6,7 @@ const badge = { critical: "🔴", high: "🟠", normal: "🟡", low: "🟢" } as
 export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): string {
   if (mail.calendar) return renderCalendarMail(mail, thread);
   const a = mail.analysis;
+  const aiUnavailable = a?.provider === "unavailable";
   const from = mail.from.map((item) => item.name ? `${item.name} <${item.address}>` : item.address).join(", ") || "نامشخص";
   const real = thread.flatMap((item) => item.attachments.filter((attachment) => attachment.isRealAttachment));
   const hidden = thread.flatMap((item) => item.attachments.filter((attachment) => !attachment.isRealAttachment && attachment.classification !== "calendar"));
@@ -16,7 +17,7 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
     return `${direction} <b>${index + 1}. ${esc(sender)}</b> — ${esc(formatDate(item.receivedAt))}\n${esc(summary)}`;
   }).join("\n\n") : "";
   return [
-    `${a ? badge[a.importance] : "⚪️"} <b>${a ? `${importanceFa(a.importance)} — ${a.score}/100` : "در انتظار تحلیل AI"}</b>`,
+    `${aiUnavailable ? "⚪️" : a ? badge[a.importance] : "⚪️"} <b>${aiUnavailable ? "AI موقتاً در دسترس نیست" : a ? `${importanceFa(a.importance)} — ${a.score}/100` : "در انتظار تحلیل AI"}</b>`,
     ``,
     thread.length > 1 ? `<b>🧵 مکالمه:</b> ${thread.length} پیام در Inbox` : "",
     mail.accountLabel ? `<b>حساب:</b> ${esc(mail.accountLabel)}` : "",

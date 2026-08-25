@@ -82,7 +82,10 @@ function parseJson(text: string): any {
 
 async function postJson(url: string, init: RequestInit, timeoutMs: number): Promise<any> {
   const response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-  if (!response.ok) throw new Error(`AI HTTP ${response.status}`);
+  if (!response.ok) {
+    const detail = (await response.text()).replace(/\s+/g, " ").trim().slice(0, 500);
+    throw new Error(`AI HTTP ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
   return response.json();
 }
 

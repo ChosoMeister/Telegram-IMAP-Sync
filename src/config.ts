@@ -59,7 +59,7 @@ const schema = z.object({
   OLLAMA_MODEL: z.string().default("qwen3:14b"),
   AI_PROXY_BASE_URL: z.string().url().optional(),
   AI_PROXY_API_KEY: z.string().optional(),
-  AI_PROXY_MODEL: z.string().default("gpt-oss-120b"),
+  AI_PROXY_MODEL: z.string().default("local-gpt-oss-120b"),
   AI_PROXY_MODEL_ORDER: z.string().optional(),
   AI_TRANSCRIPT_MODEL_ORDER: z.string().optional(),
   AI_ENABLED: bool.default(true)
