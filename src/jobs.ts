@@ -1,14 +1,14 @@
-import type { AiService } from "./ai.js";
 import { describeError } from "./errors.js";
 import type { Logger } from "./logger.js";
 import type { Store } from "./store.js";
 import type { TelegramApi } from "./telegram/api.js";
+import type { Analysis, StoredMail } from "./domain/types.js";
 
 export class DurableJobWorker {
   private running = false;
 
   constructor(
-    private store: Store, private ai: AiService, private telegram: TelegramApi, private logger: Logger,
+    private store: Store, private analyze: (mail: StoredMail) => Promise<Analysis | undefined>, private telegram: TelegramApi, private logger: Logger,
     private onAnalysis: (mailId: number) => Promise<void>
   ) {}
 
@@ -29,7 +29,7 @@ export class DurableJobWorker {
             if ((mail.analysis && mail.analysis.provider !== "unavailable") || mail.state === "done" || mail.state === "external_done") {
               this.store.completeJob(job.id); continue;
             }
-            const analysis = await this.ai.analyze(mail);
+            const analysis = await this.analyze(mail);
             if (!analysis) throw new Error("All AI providers failed");
             this.store.setAnalysis(mail.id, analysis);
             await this.onAnalysis(mail.id);

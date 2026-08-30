@@ -37,7 +37,7 @@ For a new additional account, validate its folders and SMTP in a one-off dry-run
 
 ## Health and status
 
-`http://127.0.0.1:18080/` returns `200` only while IMAP is usable and `503` while disconnected. JSON includes connection state, last successful reconciliation, last Telegram poll, Inbox/state counts, durable job counts, AI provider results, SMTP and Telegram activity, backup success/error, mode, and current time. Inside Telegram, `/status` reports the operational subset.
+`http://127.0.0.1:18080/` returns `200` only while IMAP is usable and `503` while disconnected. JSON includes connection state, last successful reconciliation, last Telegram poll, Inbox/state counts, durable job counts, learned-rule totals, AI provider results, SMTP and Telegram activity, backup success/error, mode, and current time. Inside Telegram, `/status` reports the operational subset.
 
 Useful commands:
 
@@ -69,7 +69,7 @@ Downloaded files end in `.sqlite.gz`. Decompress before the normal stopped-servi
 gunzip mailbot-CHOSEN.sqlite.gz
 ```
 
-The database contains retained email bodies, AI results, Telegram IDs, drafts, and durable outbound content. Keep the destination private and restrict membership. No mailbox password, bot token, or AI API key is stored in SQLite.
+The database contains retained email bodies, AI results, learned rules and their audit events, Telegram IDs, drafts, and durable outbound content. Keep the destination private and restrict membership. No mailbox password, bot token, or AI API key is stored in SQLite.
 
 ```sh
 docker compose stop mailbot
@@ -117,7 +117,7 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Thread has unrelated messages:** version 0.4.0 never merges by subject. Retain sanitized `Message-ID`, `In-Reply-To`, and `References` headers for diagnosis; malformed or reused sender IDs cannot be repaired safely by subject guessing.
 - **Wrong خانم/آقای in an AI draft:** unknown recipients must be neutral. For a verified person only, copy `config/honorifics.example.json` to ignored `config/honorifics.json`, use the lowercase email as key, and restart. Never commit the real directory.
 - **Bot ignores typed instructions:** free-form input must be sent using Telegram Reply to the exact prompt produced for that mail. This is deliberate protection when several drafts/questions are open.
-- **Ask AI reports unsupported attachment:** current extraction supports PDF, DOCX, HTML, and text/CSV-like formats. Images require OCR and legacy DOC/XLS or XLSX require a future isolated converter.
+- **Ask AI reports unsupported attachment:** current extraction supports PDF, DOCX, XLSX, HTML, and text/CSV-like formats. Images require OCR; legacy DOC/XLS require a future isolated converter.
 - **AI feels stuck:** the primary Telegram card changes immediately to a progress state. Each provider is limited by `AI_TIMEOUT_MS` (45 seconds by default) before fallback; structured logs include the nested network code and cause.
 - **Brief IMAP warning followed by restored:** Exchange or the network closed the long-lived session. Reconciliation waits for the reconnect supervisor and retries automatically; investigate only when health remains `503` or reconnect does not follow.
 - **Telegram polling is stale:** health returns `503` after two minutes without a successful poll. Verify host and container DNS resolution plus TCP/443 reachability to `api.telegram.org`; a successful IMAP connection alone is not sufficient health.
@@ -125,6 +125,7 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **AI job is failed:** health reports job counts and provider status. A background analysis becomes terminal after five provider failures; the email remains fully usable and interactive Ask AI can be retried later.
 - **Telegram cleanup job is failed:** the source mail action is already complete and must not be repeated. Telegram message IDs remain durable; restore Bot API access and let the cleanup job retry or inspect `/failed`.
 - **Telegram backup is missing:** confirm `BACKUP_TELEGRAM_CHAT_ID`, bot posting rights, compressed size, and `/backup`. The local online backup remains authoritative.
-- **Operational status is needed:** use `/status`, `/accounts`, `/failed`, `/backup`, `/diagnose`, or `/sync`. Responses have a Close button and the original command is removed when the bot has deletion permission.
+- **A learned analysis rule is wrong:** use `/rules` and pause the exact numbered rule. Rules are account-scoped, reversible, and cannot move or send mail. Reanalyze an affected email after disabling a rule if a fresh AI result is required.
+- **Operational status is needed:** use `/status`, `/accounts`, `/failed`, `/backup`, `/rules`, `/diagnose`, or `/sync`. Responses have a Close button and the original command is removed when the bot has deletion permission.
 - **AI returns the old greeting/closing:** version 0.3.1 normalizes generated output after the provider response. Confirm the running image/version and rebuild/redeploy; manually edited text is intentionally preserved verbatim.
 - **Restart loop:** inspect the first fatal log entry, validate `.env` with `docker compose config`, and test required destinations from inside the container.

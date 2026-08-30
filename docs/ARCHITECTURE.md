@@ -13,7 +13,7 @@ Telegram long polling <── action controller <──────────�
         └── reply/calendar workflow ──> durable RFC822 ──> SMTP ──> Sent APPEND ──> IMAP MOVE
 ```
 
-The service uses direct adapters rather than coupling domain state to a bot framework. SQLite runs in WAL mode and stores mail identity, exact RFC-derived thread keys, normalized attachment classification, AI results, Telegram message IDs, update offsets, mail-scoped conversations with exact ForceReply prompt IDs, outbound transactions, action locks, schema migrations, and durable jobs. Navigating a different card cannot clear another mail's draft or AI question.
+The service uses direct adapters rather than coupling domain state to a bot framework. SQLite runs in WAL mode and stores mail identity, exact RFC-derived thread keys, normalized attachment classification, AI results, Telegram message IDs, update offsets, mail-scoped conversations with exact ForceReply prompt IDs, outbound transactions, action locks, user-confirmed learned analysis rules and their audit events, schema migrations, and durable jobs. Navigating a different card cannot clear another mail's draft or AI question.
 
 The container is read-only except for `/data` and `/tmp`, drops Linux capabilities, binds health only to loopback on the host, and uses a named volume for portability across Linux, macOS, and Windows Docker hosts.
 
@@ -36,6 +36,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - SMTP-success/Sent-copy-pending and Sent-copy-success/archive-pending are distinct states, so retries cannot duplicate the reply.
 - Calendar Accept/Tentative/Decline reuses the same durable outbound stages and atomic lock; the stored iTIP response fixes UID, Sequence, Organizer, attendee, and PARTSTAT across retries.
 - AI results are optional and can be regenerated after restart.
+- Learned analysis rules are account-scoped and match only a normalized exact sender, sender plus normalized exact subject, or sender domain. More-specific matches win per effect. They are trusted guidance before AI and deterministic constraints after AI, but cannot trigger SMTP, IMAP MOVE, Archive, deletion, or Telegram cleanup.
 - Voice instructions reuse exact ForceReply prompt binding, are bounded by duration and bytes before download, and remain in memory only. Configured ASR models run concurrently; healthy outputs are conservatively reconciled with bounded email context, while partial model failure remains usable. Transcript approval is independent from draft approval and SMTP approval.
 - AI output passes through a provider-independent Persian style normalizer; therefore fallback-provider changes cannot reintroduce disallowed greetings or closings.
 - Optional trusted owner identity is added to AI context. Analysis records whether an action belongs to self, another person, both, or is unknown; a deterministic alias-aware pass prevents the owner from being presented in third person.

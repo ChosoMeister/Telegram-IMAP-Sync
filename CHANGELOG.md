@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.13.0 - 2026-08-30
+
+- Add user-confirmed, account-scoped learned analysis rules for importance, action ownership, and informational mail.
+- Apply verified rules as trusted AI guidance and enforce them deterministically after every analysis; learned rules never move, send, archive, or delete mail.
+- Add same-card feedback scope/confirmation UX and dismissible `/rules` management with reversible enable/disable controls.
+- Persist rule history in SQLite and include it automatically in local and Telegram database backups.
+
 ## 0.12.1 - 2026-08-30
 
 - Allow Telegram database backups to target a specific forum topic through `BACKUP_TELEGRAM_MESSAGE_THREAD_ID`.

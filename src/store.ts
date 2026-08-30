@@ -1,5 +1,5 @@
 import { backup, DatabaseSync } from "node:sqlite";
-import type { Analysis, IncomingMail, StoredMail } from "./domain/types.js";
+import type { Analysis, IncomingMail, LearnedRule, LearnedRuleEffect, LearnedRuleScope, StoredMail } from "./domain/types.js";
 import { deriveThreadKey } from "./mail/thread.js";
 
 interface MailRow {
@@ -157,6 +157,32 @@ export class Store {
         this.db.exec("COMMIT");
       } catch (error) { this.db.exec("ROLLBACK"); throw error; }
     }
+    this.applyMigration(5, `
+      CREATE TABLE IF NOT EXISTS learned_rules (
+        id INTEGER PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK(scope IN ('sender','sender_subject','domain')),
+        sender_email TEXT NOT NULL DEFAULT '',
+        sender_domain TEXT NOT NULL DEFAULT '',
+        subject_pattern TEXT NOT NULL DEFAULT '',
+        effect TEXT NOT NULL CHECK(effect IN ('importance','not_mine','informational')),
+        effect_value TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        confirmation_count INTEGER NOT NULL DEFAULT 1,
+        source_mail_id INTEGER,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(account_id,scope,sender_email,sender_domain,subject_pattern,effect)
+      );
+      CREATE INDEX learned_rules_match_idx ON learned_rules(enabled,account_id,scope,sender_email,sender_domain);
+      CREATE TABLE IF NOT EXISTS learned_rule_events (
+        id INTEGER PRIMARY KEY,
+        rule_id INTEGER REFERENCES learned_rules(id) ON DELETE CASCADE,
+        action TEXT NOT NULL,
+        details_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
     for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
       const mail = JSON.parse(row.payload_json) as IncomingMail;
       this.db.prepare("UPDATE mails SET thread_key=? WHERE id=?").run(deriveThreadKey(mail), row.id);
@@ -357,6 +383,64 @@ export class Store {
   setAnalysis(id: number, analysis: Analysis): void {
     this.db.prepare("UPDATE mails SET analysis_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?")
       .run(JSON.stringify(analysis), id);
+  }
+
+  saveLearnedRule(input: {
+    accountId: string; scope: LearnedRuleScope; senderEmail?: string; senderDomain?: string;
+    subjectPattern?: string; effect: LearnedRuleEffect; effectValue?: string; sourceMailId?: number;
+  }): LearnedRule {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare(`INSERT INTO learned_rules(account_id,scope,sender_email,sender_domain,subject_pattern,effect,effect_value,source_mail_id)
+        VALUES(?,?,?,?,?,?,?,?)
+        ON CONFLICT(account_id,scope,sender_email,sender_domain,subject_pattern,effect) DO UPDATE SET
+          effect_value=excluded.effect_value,enabled=1,confirmation_count=learned_rules.confirmation_count+1,
+          source_mail_id=excluded.source_mail_id,updated_at=CURRENT_TIMESTAMP`)
+        .run(input.accountId, input.scope, input.senderEmail ?? "", input.senderDomain ?? "",
+          input.subjectPattern ?? "", input.effect, input.effectValue ?? null, input.sourceMailId ?? null);
+      const row = this.db.prepare(`SELECT * FROM learned_rules WHERE account_id=? AND scope=? AND sender_email=?
+        AND sender_domain=? AND subject_pattern=? AND effect=?`)
+        .get(input.accountId, input.scope, input.senderEmail ?? "", input.senderDomain ?? "", input.subjectPattern ?? "", input.effect) as any;
+      this.db.prepare("INSERT INTO learned_rule_events(rule_id,action,details_json) VALUES(?, 'confirmed', ?)")
+        .run(row.id, JSON.stringify({ effectValue: input.effectValue, sourceMailId: input.sourceMailId }));
+      this.db.exec("COMMIT");
+      return this.rowToLearnedRule(row);
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  listLearnedRules(includeDisabled = true): LearnedRule[] {
+    const rows = this.db.prepare(`SELECT * FROM learned_rules ${includeDisabled ? "" : "WHERE enabled=1"} ORDER BY enabled DESC,updated_at DESC,id DESC`).all() as any[];
+    return rows.map((row) => this.rowToLearnedRule(row));
+  }
+
+  setLearnedRuleEnabled(id: number, enabled: boolean): LearnedRule | undefined {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = this.db.prepare("UPDATE learned_rules SET enabled=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(enabled ? 1 : 0, id);
+      if (!result.changes) { this.db.exec("COMMIT"); return undefined; }
+      this.db.prepare("INSERT INTO learned_rule_events(rule_id,action,details_json) VALUES(?,?, '{}')").run(id, enabled ? "enabled" : "disabled");
+      const row = this.db.prepare("SELECT * FROM learned_rules WHERE id=?").get(id) as any;
+      this.db.exec("COMMIT");
+      return row ? this.rowToLearnedRule(row) : undefined;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  getLearnedRule(id: number): LearnedRule | undefined {
+    const row = this.db.prepare("SELECT * FROM learned_rules WHERE id=?").get(id) as any;
+    return row ? this.rowToLearnedRule(row) : undefined;
+  }
+
+  private rowToLearnedRule(row: any): LearnedRule {
+    return {
+      id: row.id, accountId: row.account_id, scope: row.scope, effect: row.effect,
+      enabled: Boolean(row.enabled), confirmationCount: row.confirmation_count,
+      createdAt: row.created_at, updatedAt: row.updated_at,
+      ...(row.sender_email ? { senderEmail: row.sender_email } : {}),
+      ...(row.sender_domain ? { senderDomain: row.sender_domain } : {}),
+      ...(row.subject_pattern ? { subjectPattern: row.subject_pattern } : {}),
+      ...(row.effect_value ? { effectValue: row.effect_value } : {}),
+      ...(row.source_mail_id ? { sourceMailId: row.source_mail_id } : {})
+    };
   }
 
   retryAnalysis(id: number): boolean {

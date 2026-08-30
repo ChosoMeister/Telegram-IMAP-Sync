@@ -72,6 +72,28 @@ export interface Analysis {
   reason: string;
   provider: string;
   actionOwner?: "self" | "other" | "shared" | "unknown";
+  category?: "actionable" | "informational";
+  userCorrected?: boolean;
+  appliedRuleIds?: number[];
+}
+
+export type LearnedRuleScope = "sender" | "sender_subject" | "domain";
+export type LearnedRuleEffect = "importance" | "not_mine" | "informational";
+
+export interface LearnedRule {
+  id: number;
+  accountId: string;
+  scope: LearnedRuleScope;
+  senderEmail?: string;
+  senderDomain?: string;
+  subjectPattern?: string;
+  effect: LearnedRuleEffect;
+  effectValue?: string;
+  enabled: boolean;
+  confirmationCount: number;
+  sourceMailId?: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface StoredMail extends IncomingMail {

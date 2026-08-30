@@ -85,6 +85,8 @@ All user-visible AI values use polished administrative Persian. Generated mail m
 
 The analysis contract is JSON containing importance, score, Persian summary, suggested action, optional deadline, reason, and `actionOwner` (`self`, `other`, `shared`, or `unknown`). Email content is untrusted data and must not override the system prompt or trusted local owner profile.
 
+The user may correct importance, mark the action as owned by another person, or classify a message as informational. The correction is applied to that mail immediately. Creating a reusable rule always requires a second explicit confirmation showing the exact account, sender/domain/normalized subject condition, and effect. Rules are evaluated per receiving account; sender-plus-subject overrides sender, which overrides domain for the same effect. Verified rules are included as trusted model guidance and are re-applied deterministically to the parsed result. They never perform mailbox or outbound actions. `/rules` lists every active or paused rule and toggles it reversibly. Rule conditions, effects, confirmations, and audit events are stored in SQLite without duplicating mail bodies or attachments.
+
 Background analysis is a durable SQLite job. A crash releases an expired lease for retry; provider failures use bounded exponential delay and become terminal after five attempts. Interactive questions remain recoverable through the persisted Telegram update offset and conversation state.
 
 ## Attachment classification

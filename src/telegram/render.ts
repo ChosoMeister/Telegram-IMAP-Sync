@@ -31,6 +31,7 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
     a?.keyFactsFa?.length ? `<b>نکات کلیدی:</b>\n${a.keyFactsFa.map((fact) => `• ${esc(fact)}`).join("\n")}` : "",
     a?.riskFa ? `<b>ریسک عدم اقدام:</b> ${esc(a.riskFa)}` : "",
     a?.actionLinks?.length ? `<b>پیوندهای اقدام:</b>\n${a.actionLinks.map((link) => `• ${esc(link)}`).join("\n")}` : "",
+    a?.userCorrected ? `<b>🎯 تحلیل با بازخورد شما اصلاح شده است.</b>` : a?.appliedRuleIds?.length ? `<b>🎯 ${a.appliedRuleIds.length} قاعده تأییدشده اعمال شد.</b>` : "",
     timeline ? `\n<b>روند مکالمه:</b>\n${timeline}` : "",
     real.length ? `\n\n📎 ${real.length} پیوست اصلی — ${formatSize(real.reduce((n, x) => n + x.size, 0))}` : "",
     hidden.length ? `🖼 ${hidden.length} تصویر درون‌متن/امضا مخفی شد` : ""
@@ -76,6 +77,7 @@ export function mailButtons(mail: StoredMail, thread: StoredMail[] = [mail]) {
   if (realCount) rows.push([{ text: `📎 پیوست‌ها (${realCount})`, callback_data: `m:${id}:files` }]);
   if (hiddenCount) rows.push([{ text: `🖼 موارد مخفی (${hiddenCount})`, callback_data: `m:${id}:hidden` }]);
   if (aiUnavailable) rows.push([{ text: "🔄 تلاش مجدد تحلیل", callback_data: `m:${id}:retryai`, style: "primary" }]);
+  else if (mail.analysis) rows.push([{ text: "🎯 اصلاح تحلیل", callback_data: `m:${id}:feedback` }]);
   return rows;
 }
 

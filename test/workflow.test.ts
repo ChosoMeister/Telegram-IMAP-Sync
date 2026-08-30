@@ -55,6 +55,41 @@ describe("Done transaction", () => {
     expect(s.store.jobCounts()).toMatchObject({ complete: 1 });
     s.store.close();
   });
+  it("corrects one analysis, confirms an account-scoped rule, and applies it to future mail", async () => {
+    const s = setup();
+    s.store.setAnalysis(s.id, { importance: "high", score: 85, summaryFa: "خلاصه", suggestedAction: "بررسی کنید", reason: "درخواست", provider: "proxy:test", actionOwner: "self", riskFa: "تأخیر" });
+
+    await (s.app as any).handleCallback("menu", `m:${s.id}:feedback`);
+    await (s.app as any).handleCallback("choice", `m:${s.id}:fbinformational`);
+    expect(s.store.getMail(s.id)?.analysis).toMatchObject({ importance: "low", score: 30, category: "informational", userCorrected: true });
+    expect(s.store.getMail(s.id)?.analysis?.riskFa).toBeUndefined();
+
+    await (s.app as any).handleCallback("scope", `m:${s.id}:fbsender`);
+    expect(s.store.listLearnedRules()).toHaveLength(0);
+    await (s.app as any).handleCallback("confirm", `m:${s.id}:fbconfirm`);
+    expect(s.store.listLearnedRules()).toHaveLength(1);
+    expect(s.store.listLearnedRules()[0]).toMatchObject({ accountId: "primary", scope: "sender", effect: "informational", enabled: true });
+
+    const future = s.store.upsertMail({ ...incoming, uid: 8, messageId: "<future@example.com>" });
+    s.store.enqueueJob("analyze", future.id);
+    s.ai.analyze.mockResolvedValueOnce({ importance: "critical", score: 98, summaryFa: "جدید", suggestedAction: "فوری", reason: "مدل", provider: "proxy:test", actionOwner: "self", riskFa: "ریسک" });
+    await (s.app as any).processJobs();
+    expect(s.ai.analyze).toHaveBeenCalledWith(expect.objectContaining({ id: future.id }), expect.stringContaining("informational"));
+    expect(s.store.getMail(future.id)?.analysis).toMatchObject({ importance: "low", score: 30, category: "informational", actionOwner: "other" });
+    s.store.close();
+  });
+
+  it("lists learned rules and toggles them from the operational command", async () => {
+    const s = setup();
+    const rule = s.store.saveLearnedRule({ accountId: "primary", scope: "sender", senderEmail: "sender@example.com", effect: "not_mine" });
+    await (s.app as any).handleText({ message_id: 901, chat: { id: 42 }, from: { id: 42 }, text: "/rules" });
+    expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining(`#${rule.id}`), expect.arrayContaining([
+      [{ text: `⏸ غیرفعال #${rule.id}`, callback_data: `sys:rule:${rule.id}:toggle` }]
+    ]), true);
+    await (s.app as any).handleSystemCallback("toggle", `sys:rule:${rule.id}:toggle`, 200);
+    expect(s.store.getLearnedRule(rule.id)?.enabled).toBe(false);
+    s.store.close();
+  });
   it("archives before deleting Telegram messages", async () => {
     const s = setup();
     (s.app as any).config.APP_MODE = "live";

@@ -20,6 +20,7 @@ import type { AsrCandidate, SpeechToTextService } from "./stt.js";
 import type { TranscriptConsensus } from "./ai.js";
 import { SafeScheduler } from "./scheduler.js";
 import { DurableJobWorker } from "./jobs.js";
+import { effectLabel, LearnedRuleService, type FeedbackChoice, type RuleProposal } from "./learned-rules.js";
 
 export class MailBotApp {
   private readonly startedAt = new Date();
@@ -34,6 +35,7 @@ export class MailBotApp {
   private cardsVerified = false;
   private readonly scheduler: SafeScheduler;
   private readonly jobs: DurableJobWorker;
+  private readonly learnedRules: LearnedRuleService;
   constructor(
     private config: MailAccountAppConfig, private store: Store, private imap: ImapService,
     private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger,
@@ -42,7 +44,11 @@ export class MailBotApp {
     this.accounts = [{ id: config.mailAccountId, label: config.mailAccountLabel, config, imap, smtp }, ...additionalAccounts];
     this.primaryAccountId = this.accounts[0]!.id;
     this.scheduler = new SafeScheduler(logger);
-    this.jobs = new DurableJobWorker(store, ai, telegram, logger, async (mailId) => {
+    this.learnedRules = new LearnedRuleService(store);
+    this.jobs = new DurableJobWorker(store, async (mail) => {
+      const analysis = await ai.analyze(mail, this.learnedRules.trustedGuidance(mail));
+      return analysis ? this.learnedRules.applyMatching(mail, analysis) : undefined;
+    }, telegram, logger, async (mailId) => {
       const representative = this.store.threadRepresentative(mailId);
       if (representative) await this.enrichTelegram(representative);
     });
@@ -62,6 +68,7 @@ export class MailBotApp {
       { command: "accounts", description: "وضعیت حساب‌های ایمیل" },
       { command: "failed", description: "عملیات ناموفق" },
       { command: "backup", description: "وضعیت نسخه پشتیبان" },
+      { command: "rules", description: "مدیریت قواعد یادگرفته‌شده" },
       { command: "diagnose", description: "گزارش کامل سلامت" },
       { command: "chatid", description: "نمایش شناسه چت برای Backup" }
     ]).catch((error) => this.logger.warn("Could not register Telegram commands", { error: describeError(error) }));
@@ -93,11 +100,13 @@ export class MailBotApp {
   }
 
   status(): Record<string, unknown> {
+    const learnedRules = this.learnedRules.list();
     return {
       ok: this.isHealthy(), imapConnected: this.accounts.every((account) => account.imap.isConnected()), syncRunning: this.syncRunning,
       accounts: Object.fromEntries(this.accounts.map((account) => [account.id, { label: account.label, imapConnected: account.imap.isConnected(), lastSuccessfulSync: this.lastSuccessfulSync.get(account.id)?.toISOString(), inboxCount: this.inboxCount.get(account.id) ?? 0, smtp: account.smtp.status() }])),
       lastTelegramPoll: this.lastTelegramPoll?.toISOString(), inboxCount: [...this.inboxCount.values()].reduce((sum, count) => sum + count, 0),
       jobs: this.store.jobCounts(), ai: this.ai.status(), stt: this.stt?.status() ?? { enabled: false }, smtp: this.smtp.status(), telegram: this.telegram.status(),
+      learnedRules: { total: learnedRules.length, enabled: learnedRules.filter((rule) => rule.enabled).length },
       backup: {
         lastSuccess: this.store.getKv("backup:last-success"), lastError: this.store.getKv("backup:last-error"),
         telegramLastSuccess: this.store.getKv("backup:telegram-last-success"), telegramLastError: this.store.getKv("backup:telegram-last-error")
@@ -310,10 +319,16 @@ export class MailBotApp {
   private async handleSystemCallback(callbackId: string, data: string, messageId?: number): Promise<void> {
     await this.answerCallback(callbackId);
     if (data === "sys:close" && messageId) await this.telegram.deleteMessages([messageId]).catch(() => false);
+    const ruleMatch = /^sys:rule:(\d+):toggle$/.exec(data);
+    if (ruleMatch && messageId) {
+      this.learnedRules.toggle(Number(ruleMatch[1]));
+      const rendered = this.renderRulesCommand();
+      await this.telegram.editMessage(messageId, rendered.text, rendered.buttons);
+    }
   }
 
   private async handleCallback(callbackId: string, data: string): Promise<void> {
-    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|retryai|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|voice|voiceconfirm|voiceedit|voiceraw|voiceclean|edit|formal|short|friendly|send|cancel)$/.exec(data);
+    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|retryai|feedback|fbimportance|fbnotmine|fbinformational|fbi(?:critical|high|normal|low)|fbonce|fbsender|fbsubject|fbdomain|fbconfirm|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|voice|voiceconfirm|voiceedit|voiceraw|voiceclean|edit|formal|short|friendly|send|cancel)$/.exec(data);
     if (!match) return;
     const requestedMailId = Number(match[1]);
     const requestedMail = this.store.getMail(requestedMailId);
@@ -343,6 +358,16 @@ export class MailBotApp {
     if (action === "ask") return this.chooseAiContext(mail);
     if (action === "askmail" || action === "askfiles" || action === "askthread") return this.startAiQuestion(mail, action === "askthread" ? "thread" : action === "askfiles" ? "attachments" : "mail");
     if (action === "retryai") return this.retryAnalysis(mail);
+    if (action === "feedback") return this.showFeedbackMenu(mail);
+    if (action === "fbimportance") return this.showImportanceFeedback(mail);
+    if (action === "fbnotmine") return this.acceptFeedbackChoice(mail, { effect: "not_mine" });
+    if (action === "fbinformational") return this.acceptFeedbackChoice(mail, { effect: "informational" });
+    if (action?.startsWith("fbi")) return this.acceptFeedbackChoice(mail, { effect: "importance", effectValue: action.slice(3) });
+    if (action === "fbonce") { this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id); return this.showSummary(mail); }
+    if (action === "fbsender" || action === "fbsubject" || action === "fbdomain") {
+      return this.prepareFeedbackRule(mail, action === "fbdomain" ? "domain" : action === "fbsubject" ? "sender_subject" : "sender");
+    }
+    if (action === "fbconfirm") return this.confirmFeedbackRule(mail);
     if (action === "done") return this.done(mail);
     if (action?.startsWith("calaccept") || action?.startsWith("caltentative") || action?.startsWith("caldecline")) {
       const response: CalendarResponse = action.startsWith("calaccept") ? "accept" : action.startsWith("caltentative") ? "tentative" : "decline";
@@ -409,6 +434,120 @@ export class MailBotApp {
       }
       throw error;
     }
+  }
+
+  private async showFeedbackMenu(mail: StoredMail): Promise<void> {
+    if (!mail.analysis || mail.analysis.provider === "unavailable") return this.showSummary(mail);
+    await this.editPrimary(mail, [
+      "<b>🎯 اصلاح تحلیل</b>", "", "این اصلاح ابتدا فقط روی همین ایمیل اعمال می‌شود.",
+      "برای ساخت قاعده دائمی، محدوده و متن Rule را جداگانه تأیید خواهید کرد."
+    ].join("\n"), [
+      [{ text: "📊 اهمیت اشتباه است", callback_data: `m:${mail.id}:fbimportance`, style: "primary" }],
+      [{ text: "👤 اقدام مربوط به من نیست", callback_data: `m:${mail.id}:fbnotmine` }],
+      [{ text: "ℹ️ فقط اطلاع‌رسانی است", callback_data: `m:${mail.id}:fbinformational` }],
+      [{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }]
+    ]);
+  }
+
+  private async showImportanceFeedback(mail: StoredMail): Promise<void> {
+    await this.editPrimary(mail, "<b>اهمیت صحیح این ایمیل چیست؟</b>", [
+      [
+        { text: "🔴 خیلی مهم", callback_data: `m:${mail.id}:fbicritical`, style: "danger" },
+        { text: "🟠 مهم", callback_data: `m:${mail.id}:fbihigh` }
+      ],
+      [
+        { text: "🟡 عادی", callback_data: `m:${mail.id}:fbinormal` },
+        { text: "🟢 کم‌اهمیت", callback_data: `m:${mail.id}:fbilow` }
+      ],
+      [{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:feedback` }]
+    ]);
+  }
+
+  private async acceptFeedbackChoice(mail: StoredMail, choice: FeedbackChoice): Promise<void> {
+    if (!mail.analysis || mail.analysis.provider === "unavailable") return this.showSummary(mail);
+    const corrected = this.learnedRules.applyUserCorrection(mail.analysis, choice);
+    this.store.setAnalysis(mail.id, corrected);
+    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "feedback_scope", false, "formal", undefined, { feedback: choice });
+    const sender = mail.from[0]?.address ?? "نامشخص";
+    const domain = sender.includes("@") ? sender.split("@")[1] : undefined;
+    await this.editPrimary(this.store.getMail(mail.id)!, [
+      `<b>✅ همین ایمیل اصلاح شد:</b> ${esc(effectLabel(choice.effect, choice.effectValue))}`,
+      "", "آیا این ترجیح برای ایمیل‌های آینده نیز ذخیره شود؟"
+    ].join("\n"), [
+      [{ text: "فقط همین ایمیل", callback_data: `m:${mail.id}:fbonce`, style: "success" }],
+      [{ text: `همین فرستنده`, callback_data: `m:${mail.id}:fbsender` }],
+      [{ text: "همین فرستنده + موضوع", callback_data: `m:${mail.id}:fbsubject` }],
+      ...(domain ? [[{ text: `همه فرستنده‌های @${domain.slice(0, 35)}`, callback_data: `m:${mail.id}:fbdomain` }]] : []),
+      [{ text: "❌ لغو", callback_data: `m:${mail.id}:cancel`, style: "danger" }]
+    ]);
+  }
+
+  private async prepareFeedbackRule(mail: StoredMail, scope: "sender" | "sender_subject" | "domain"): Promise<void> {
+    const conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
+    const feedback = this.feedbackChoice(conversation?.metadata?.feedback);
+    if (!feedback) return this.showFeedbackMenu(mail);
+    const proposal = this.learnedRules.proposal(mail, feedback, scope);
+    if (!proposal) return this.showSummary(mail);
+    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "feedback_confirm", false, "formal", undefined, { proposal });
+    const condition = scope === "domain" ? `دامنه فرستنده برابر <code>${esc(proposal.senderDomain!)}</code>`
+      : scope === "sender_subject" ? `فرستنده <code>${esc(proposal.senderEmail!)}</code> و موضوع برابر «${esc(proposal.subjectPattern!)}»`
+        : `فرستنده برابر <code>${esc(proposal.senderEmail!)}</code>`;
+    await this.editPrimary(mail, [
+      "<b>تأیید Rule یادگرفته‌شده</b>", "", `<b>حساب:</b> ${esc(mail.accountLabel ?? proposal.accountId)}`,
+      `<b>اگر:</b> ${condition}`, `<b>آنگاه:</b> ${esc(effectLabel(proposal.effect, proposal.effectValue))}`,
+      "", "این Rule فقط تحلیل را اصلاح می‌کند و هیچ ایمیلی را جابه‌جا، حذف یا ارسال نمی‌کند."
+    ].join("\n"), [[
+      { text: "✅ ذخیره Rule", callback_data: `m:${mail.id}:fbconfirm`, style: "success" },
+      { text: "❌ لغو", callback_data: `m:${mail.id}:cancel`, style: "danger" }
+    ]]);
+  }
+
+  private async confirmFeedbackRule(mail: StoredMail): Promise<void> {
+    const conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
+    const proposal = this.ruleProposal(conversation?.metadata?.proposal);
+    if (!proposal) return this.showFeedbackMenu(mail);
+    const rule = this.learnedRules.save(proposal);
+    this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
+    this.logger.info("User-confirmed learned analysis rule saved", { ruleId: rule.id, mailId: mail.id, accountId: rule.accountId, scope: rule.scope, effect: rule.effect });
+    await this.showSummary(this.store.getMail(mail.id)!);
+  }
+
+  private feedbackChoice(value: unknown): FeedbackChoice | undefined {
+    if (!value || typeof value !== "object") return undefined;
+    const candidate = value as Record<string, unknown>;
+    if (!["importance", "not_mine", "informational"].includes(String(candidate.effect))) return undefined;
+    if (candidate.effect === "importance" && !["critical", "high", "normal", "low"].includes(String(candidate.effectValue))) return undefined;
+    return { effect: candidate.effect as FeedbackChoice["effect"], ...(typeof candidate.effectValue === "string" ? { effectValue: candidate.effectValue } : {}) };
+  }
+
+  private ruleProposal(value: unknown): RuleProposal | undefined {
+    if (!value || typeof value !== "object") return undefined;
+    const candidate = value as Record<string, unknown>;
+    const feedback = this.feedbackChoice(candidate);
+    if (!feedback || !["sender", "sender_subject", "domain"].includes(String(candidate.scope)) || typeof candidate.accountId !== "string" || typeof candidate.sourceMailId !== "number") return undefined;
+    if (candidate.sourceMailId <= 0 || candidate.sourceMailId !== Math.trunc(candidate.sourceMailId)) return undefined;
+    return {
+      ...feedback, accountId: candidate.accountId, scope: candidate.scope as RuleProposal["scope"], sourceMailId: candidate.sourceMailId,
+      ...(typeof candidate.senderEmail === "string" ? { senderEmail: candidate.senderEmail } : {}),
+      ...(typeof candidate.senderDomain === "string" ? { senderDomain: candidate.senderDomain } : {}),
+      ...(typeof candidate.subjectPattern === "string" ? { subjectPattern: candidate.subjectPattern } : {})
+    };
+  }
+
+  private renderRulesCommand(): { text: string; buttons: Array<Array<{ text: string; callback_data: string }>> } {
+    const allRules = this.learnedRules.list();
+    const rules = allRules.slice(0, 10);
+    const text = rules.length ? [
+      `<b>🎯 قواعد یادگرفته‌شده (${allRules.length})</b>`, "",
+      ...rules.map((rule) => `${rule.enabled ? "✅" : "⏸"} <b>#${rule.id}</b> [${esc(rule.accountId.slice(0, 60))}]\n${esc(this.learnedRules.describe(rule).slice(0, 280))}`),
+      ...(allRules.length > 10 ? ["", "فقط ۱۰ Rule آخر نمایش داده شده است."] : [])
+    ].join("\n\n") : "هیچ Rule یادگرفته‌شده‌ای ثبت نشده است.";
+    const buttons = rules.map((rule) => [{
+      text: `${rule.enabled ? "⏸ غیرفعال" : "▶️ فعال"} #${rule.id}`,
+      callback_data: `sys:rule:${rule.id}:toggle`
+    }]);
+    buttons.push([{ text: "✖️ بستن", callback_data: "sys:close" }]);
+    return { text, buttons };
   }
 
   private async retryAnalysis(mail: StoredMail): Promise<void> {
@@ -681,12 +820,18 @@ export class MailBotApp {
       await this.sendCommandResult(message, ["<b>نسخه پشتیبان</b>", `محلی: ${esc(String(backup.lastSuccess ?? "ثبت نشده"))}`, `Telegram: ${esc(String(backup.telegramLastSuccess ?? "غیرفعال/ثبت نشده"))}`, ...(backup.lastError ? [`خطا: ${esc(String(backup.lastError))}`] : []), ...(backup.telegramLastError ? [`خطای Telegram: ${esc(String(backup.telegramLastError))}`] : [])].join("\n"));
       return;
     }
+    if (command === "/rules") {
+      const rendered = this.renderRulesCommand();
+      await this.sendCommandResult(message, rendered.text, rendered.buttons);
+      return;
+    }
     if (command === "/diagnose") {
       const status = this.status();
       await this.sendCommandResult(message, [
         `<b>گزارش سلامت MailBot</b>`, `Overall: ${status.ok ? "✅" : "❌"}`, `Inbox/Pending: ${status.inboxCount}/${status.pending}`,
         `Telegram: ${(status.telegram as any)?.ok ? "✅" : "❌"}`, `AI: ${Object.values(status.ai as Record<string, any>).some((item) => item.ok) ? "✅" : "❌"}`,
         `STT: ${(status.stt as any)?.ok ? "✅" : "—"}`, `Jobs: ${esc(JSON.stringify(status.jobs))}`,
+        `Rules: ${(status.learnedRules as any)?.enabled ?? 0}/${(status.learnedRules as any)?.total ?? 0}`,
         `Backup: ${(status.backup as any)?.lastSuccess ? "✅" : "❌"}`, `آخرین Poll: ${esc(String(status.lastTelegramPoll ?? "نامشخص"))}`
       ].join("\n"));
       return;
@@ -812,8 +957,8 @@ export class MailBotApp {
     else await this.showDraft(mail, draft, conversation.replyAll, voiceTranscript);
   }
 
-  private async sendCommandResult(command: TelegramMessage, text: string): Promise<void> {
-    await this.telegram.sendMessageTo(command.chat.id, text, [[{ text: "✖️ بستن", callback_data: "sys:close" }]], true);
+  private async sendCommandResult(command: TelegramMessage, text: string, buttons?: Array<Array<{ text: string; callback_data: string; style?: "danger" | "success" | "primary" }>>): Promise<void> {
+    await this.telegram.sendMessageTo(command.chat.id, text, buttons ?? [[{ text: "✖️ بستن", callback_data: "sys:close" }]], true);
     await this.telegram.deleteMessages([command.message_id]).catch(() => false);
   }
 
