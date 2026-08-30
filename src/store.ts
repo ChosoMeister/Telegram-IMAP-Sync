@@ -235,6 +235,15 @@ export class Store {
     return Object.fromEntries(rows.map((row) => [row.state, row.count]));
   }
 
+  failureSummary(limit = 10): Array<{ kind: "mail" | "job"; id: number; subject?: string; error?: string }> {
+    const mails = this.db.prepare("SELECT id,payload_json,last_error FROM mails WHERE state='failed' ORDER BY updated_at DESC LIMIT ?").all(limit) as unknown as Array<{ id: number; payload_json: string; last_error: string | null }>;
+    const jobs = this.db.prepare("SELECT id,kind,last_error FROM jobs WHERE state='failed' ORDER BY updated_at DESC LIMIT ?").all(limit) as unknown as Array<{ id: number; kind: string; last_error: string | null }>;
+    return [
+      ...mails.map((row) => ({ kind: "mail" as const, id: row.id, subject: (JSON.parse(row.payload_json) as IncomingMail).subject, ...(row.last_error ? { error: row.last_error } : {}) })),
+      ...jobs.map((row) => ({ kind: "job" as const, id: row.id, subject: row.kind, ...(row.last_error ? { error: row.last_error } : {}) }))
+    ].slice(0, limit);
+  }
+
   purgeCompleted(retentionDays: number): number {
     const result = this.db.prepare(`DELETE FROM mails WHERE state IN ('done','external_done')
       AND datetime(updated_at) < datetime('now', ?)`)

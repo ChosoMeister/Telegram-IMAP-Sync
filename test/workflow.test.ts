@@ -12,6 +12,7 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
   const telegram = {
     answerCallbackQuery: vi.fn().mockResolvedValue(true), deleteMessages: vi.fn().mockResolvedValue(true),
     sendMessage: vi.fn().mockResolvedValue({ message_id: 200, chat: { id: 42 } }), editMessage: vi.fn().mockResolvedValue(true),
+    sendMessageTo: vi.fn().mockResolvedValue({ message_id: 200, chat: { id: 42 } }),
     sendDocument: vi.fn(), downloadFile: vi.fn().mockResolvedValue({ content: Buffer.from("voice"), filePath: "voice/file_1.ogg" }), getUpdates: vi.fn()
   };
   const imap = {
@@ -34,6 +35,13 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
 }
 
 describe("Done transaction", () => {
+  it("renders operational commands as dismissible messages and removes the typed command", async () => {
+    const s = setup();
+    await (s.app as any).handleText({ message_id: 900, chat: { id: 42 }, from: { id: 42 }, text: "/failed" });
+    expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, "✅ عملیات ناموفق ثبت‌شده‌ای وجود ندارد.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]], true);
+    expect(s.telegram.deleteMessages).toHaveBeenCalledWith([900]);
+    s.store.close();
+  });
   it("immediately retries a failed AI analysis from its Telegram button", async () => {
     const s = setup();
     s.store.setAnalysis(s.id, { importance: "normal", score: 0, summaryFa: "failed", suggestedAction: "retry", reason: "outage", provider: "unavailable" });
@@ -54,6 +62,17 @@ describe("Done transaction", () => {
     expect(s.archive).toHaveBeenCalledOnce();
     expect(s.telegram.deleteMessages).toHaveBeenCalledWith([100, 101]);
     expect(s.store.getMail(s.id)?.state).toBe("done");
+    s.store.close();
+  });
+  it("keeps a completed mail durable when Telegram cleanup fails", async () => {
+    const s = setup();
+    (s.app as any).config.APP_MODE = "live";
+    s.telegram.deleteMessages.mockRejectedValueOnce(new Error("Telegram unavailable"));
+    await (s.app as any).handleCallback("cb", `m:${s.id}:done`);
+    expect(s.archive).toHaveBeenCalledOnce();
+    expect(s.store.getMail(s.id)?.state).toBe("done");
+    expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([100, 101]);
+    expect(s.store.jobCounts()).toMatchObject({ queued: 1 });
     s.store.close();
   });
   it("routes an action to the account that received the mail", async () => {
@@ -226,6 +245,14 @@ describe("incremental reconciliation recovery", () => {
     expect(s.store.getMail(s.id)?.state).toBe("pending");
     await s.app.syncInbox(false);
     expect(s.store.getMail(s.id)?.state).toBe("external_done");
+
+    // Mailbox completion is durable before Telegram cleanup. The queued cleanup
+    // can be retried without repeating the external mailbox operation.
+    expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([100, 101]);
+    // The fixture's analysis job is still queued; cleanup is the second job.
+    expect(s.store.jobCounts()).toMatchObject({ queued: 2 });
+
+    await (s.app as any).processJobs();
     expect(s.telegram.deleteMessages).toHaveBeenCalledWith([100, 101]);
     expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([]);
     s.store.close();

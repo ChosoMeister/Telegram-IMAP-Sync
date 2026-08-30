@@ -65,6 +65,10 @@ export interface Analysis {
   summaryFa: string;
   suggestedAction: string;
   deadline?: string;
+  keyFactsFa?: string[];
+  amountsFa?: string[];
+  riskFa?: string;
+  actionLinks?: string[];
   reason: string;
   provider: string;
   actionOwner?: "self" | "other" | "shared" | "unknown";

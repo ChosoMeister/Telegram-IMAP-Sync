@@ -30,9 +30,9 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - Duplicate IMAP events are harmless because of the unique identity constraint.
 - Only exact normalized Message-ID relationships form a thread. The newest pending Inbox member owns the Telegram card; older member cards are removed, and Done/Reply/Forward archive the actionable group together.
 - Telegram API rate limits honor `retry_after`; transient retries are limited to operations that cannot create duplicate chat messages.
-- Failed Done operations remain visible and retryable.
+- Mailbox/outbound completion is committed before Telegram deletion. Cleanup is a separate durable job, so a Bot API failure cannot repeat Archive or SMTP and retains the tracked Telegram IDs for retry.
 - Pending items absent from Inbox on two consecutive reconciliations are treated as externally completed and their Telegram content is removed.
-- SQLite uses its online backup API; retention is applied inside `/data/backups` without copying a live WAL database file directly.
+- SQLite uses its online backup API; retention is applied inside `/data/backups` without copying a live WAL database file directly. An optional gzip-compressed copy can be delivered to a dedicated private Telegram chat after local backup success.
 - SMTP-success/Sent-copy-pending and Sent-copy-success/archive-pending are distinct states, so retries cannot duplicate the reply.
 - Calendar Accept/Tentative/Decline reuses the same durable outbound stages and atomic lock; the stored iTIP response fixes UID, Sequence, Organizer, attendee, and PARTSTAT across retries.
 - AI results are optional and can be regenerated after restart.
@@ -41,6 +41,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - Optional trusted owner identity is added to AI context. Analysis records whether an action belongs to self, another person, both, or is unknown; a deterministic alias-aware pass prevents the owner from being presented in third person.
 - Reply output also passes through a gender-safety normalizer: it strips unverified gendered titles and applies only an optional exact email-address override.
 - AI analysis jobs are leased from SQLite; abandoned leases return to the queue and repeated provider failures are bounded.
+- Periodic reconciliation, rotation, cleanup, retention, and backup tasks suppress overlapping executions and report rejected overlaps or task failures.
 - Legacy Inbox payloads missing attachment classification are refetched once and their existing Telegram cards are edited in place.
 - Legacy Inbox calendar payloads without structured event metadata are refetched once; ICS fields are parsed deterministically and the existing card is edited without waiting for AI.
 - Thread lookup temporarily opens Inbox/Archive/Sent mailboxes and restores the configured Inbox before normal reconciliation resumes.

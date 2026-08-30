@@ -2,10 +2,17 @@
 
 ## Unreleased
 
+## 0.12.0 - 2026-08-30
+
 - Update the proxy defaults and examples to the deployed `local-gpt-oss-120b` and `local-gemma4-26b` model names.
 - Keep email cards usable during a full AI outage, show an explicit temporary-unavailable state after bounded retries, and automatically retry failed analysis after cooldown.
 - Include bounded upstream HTTP error details in AI diagnostics without logging credentials or email content.
 - Show an explicit failed-analysis state with a Telegram button that immediately resets and retries the durable AI job.
+- Record IMAP/SMTP completion before Telegram cleanup and retry cleanup through the durable job queue without repeating mail actions.
+- Add overlap-safe scheduled tasks, optional compressed SQLite delivery to a dedicated Telegram chat, and bounded container resources.
+- Render grounded action packets with deadlines, amounts, key facts, risks, and email-sourced action links.
+- Extract XLSX text without an OCR model and include real attachments from every pending message in a merged thread.
+- Add dismissible `/sync`, `/accounts`, `/failed`, `/backup`, `/diagnose`, and `/chatid` operational commands.
 
 ## 0.11.2 - 2026-08-22
 

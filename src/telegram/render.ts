@@ -26,6 +26,11 @@ export function renderMail(mail: StoredMail, thread: StoredMail[] = [mail]): str
     `<b>زمان:</b> ${esc(formatDate(mail.receivedAt))}`,
     ``,
     a ? `<b>${thread.length > 1 ? "خلاصه آخرین پیام" : "خلاصه AI"}:</b>\n${esc(a.summaryFa)}\n\n<b>${actionLabel(a.actionOwner)}:</b>\n${esc(a.suggestedAction)}` : `<i>ایمیل بدون انتظار برای AI دریافت شد؛ نتیجه بعداً افزوده می‌شود.</i>`,
+    a?.deadline ? `\n<b>⏳ مهلت:</b> ${esc(a.deadline)}` : "",
+    a?.amountsFa?.length ? `<b>💰 مبالغ:</b> ${esc(a.amountsFa.join("، "))}` : "",
+    a?.keyFactsFa?.length ? `<b>نکات کلیدی:</b>\n${a.keyFactsFa.map((fact) => `• ${esc(fact)}`).join("\n")}` : "",
+    a?.riskFa ? `<b>ریسک عدم اقدام:</b> ${esc(a.riskFa)}` : "",
+    a?.actionLinks?.length ? `<b>پیوندهای اقدام:</b>\n${a.actionLinks.map((link) => `• ${esc(link)}`).join("\n")}` : "",
     timeline ? `\n<b>روند مکالمه:</b>\n${timeline}` : "",
     real.length ? `\n\n📎 ${real.length} پیوست اصلی — ${formatSize(real.reduce((n, x) => n + x.size, 0))}` : "",
     hidden.length ? `🖼 ${hidden.length} تصویر درون‌متن/امضا مخفی شد` : ""

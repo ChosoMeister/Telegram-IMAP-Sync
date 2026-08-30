@@ -9,6 +9,8 @@ const schema = z.object({
   BACKUP_DIR: z.string().default("/data/backups"),
   BACKUP_INTERVAL_HOURS: z.coerce.number().int().min(1).default(24),
   BACKUP_RETENTION: z.coerce.number().int().min(1).default(7),
+  BACKUP_TELEGRAM_CHAT_ID: z.coerce.number().int().optional(),
+  BACKUP_TELEGRAM_MAX_BYTES: z.coerce.number().int().min(1_000_000).max(50_000_000).default(49_000_000),
   DATA_RETENTION_DAYS: z.coerce.number().int().min(1).default(90),
   MAIL_RULES_PATH: z.string().optional(),
   HONORIFICS_PATH: z.string().optional(),
@@ -70,7 +72,8 @@ type RequiredMailKey = "IMAP_HOST" | "IMAP_USER" | "IMAP_PASSWORD" | "SMTP_HOST"
 export type MailAccountAppConfig = Omit<AppConfig, RequiredMailKey> & { [K in RequiredMailKey]-?: Exclude<AppConfig[K], undefined> } & { mailAccountId: string; mailAccountLabel: string };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = schema.parse(env);
+  const normalizedEnv = { ...env, ...(env.BACKUP_TELEGRAM_CHAT_ID?.trim() === "" ? { BACKUP_TELEGRAM_CHAT_ID: undefined } : {}) };
+  const parsed = schema.parse(normalizedEnv);
   if (parsed.VOICE_REPLY_ENABLED && (!parsed.STT_BASE_URL || !parsed.STT_API_KEY)) {
     throw new Error("VOICE_REPLY_ENABLED=true requires STT_BASE_URL and STT_API_KEY");
   }

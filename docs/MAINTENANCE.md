@@ -16,5 +16,6 @@ For every behavior or configuration change:
 8. Add a dated `CHANGELOG.md` entry for a release.
 9. Run `npm run check`, `npm audit --omit=dev`, `docker compose config --quiet`, and a tracked-tree secret/confidentiality scan.
 10. After push, require the GitHub Actions run to pass and verify the expected GHCR architecture/tag metadata.
+11. Treat the semantic version tag as immutable: bump `package.json` before release and never publish new code over an existing GHCR version tag.
 
 Do not document local credentials, real mail addresses, private folder rules, API keys, host IPs, Telegram IDs, or production logs.

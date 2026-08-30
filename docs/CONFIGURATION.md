@@ -12,6 +12,8 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `BACKUP_DIR` | `/data/backups` | Online SQLite backup destination. |
 | `BACKUP_INTERVAL_HOURS` | `24` | Backup frequency; minimum 1. |
 | `BACKUP_RETENTION` | `7` | Number of newest online backups retained. |
+| `BACKUP_TELEGRAM_CHAT_ID` | unset | Optional private channel/group ID receiving a gzip-compressed copy after each successful local backup. Keep this separate from the operational bot chat. |
+| `BACKUP_TELEGRAM_MAX_BYTES` | `49000000` | Skip Telegram delivery when the compressed backup exceeds this size; the valid local backup is retained. Maximum 50 MB. |
 | `DATA_RETENTION_DAYS` | `90` | Deletes only completed local SQLite records after this age; Exchange messages remain untouched. |
 | `MAIL_RULES_PATH` | unset | JSON rule file, normally `/app/config/mail-rules.json`. |
 | `HONORIFICS_PATH` | unset | Optional JSON map of lowercase email addresses to verified `خانم` or `آقای`; normally `/app/config/honorifics.json`. Unknown people are addressed neutrally. |
@@ -113,7 +115,7 @@ Voice is an instruction to the drafting model, not an automatic outbound message
 
 Unknown providers in `AI_PROVIDER_ORDER` are ignored. A `proxy` entry expands to every model in `AI_PROXY_MODEL_ORDER`; timeout, HTTP failure, invalid JSON, or schema failure advances to the next model. If all models/providers fail, Telegram receives the usable email card without AI enrichment.
 
-Ask AI supports the current email, its real extractable attachments, or its thread. Extractable formats are PDF, DOCX, HTML, TXT, CSV, TSV, JSON, XML, and log/text MIME types. Unsupported and oversized files are named in the context with a reason rather than parsed. Files are processed in memory and are not persisted by the extractor.
+Ask AI supports the current email, real extractable attachments from every pending message in its merged thread, or its discovered mail thread. Extractable formats are PDF, DOCX, XLSX, HTML, TXT, CSV, TSV, JSON, XML, and log/text MIME types. XLSX extraction is bounded to 20 worksheets, 500 rows per sheet, and 100 cells per row. Unsupported and oversized files are named in the context with a reason rather than parsed. OCR is intentionally not included; image-only PDFs and image attachments require a separately approved OCR engine. Files are processed in memory and are not persisted by the extractor.
 
 The Persian administrative wording policy is intentionally not configurable per provider: every configured model receives the same instruction and every generated result is normalized before use. Reply drafts never infer gender. Copy `config/honorifics.example.json` to the ignored `config/honorifics.json` only for people whose title is known and verified. Manual edits entered in Telegram bypass this normalization and remain verbatim.
 

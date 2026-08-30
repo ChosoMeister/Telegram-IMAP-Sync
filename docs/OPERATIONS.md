@@ -59,6 +59,18 @@ docker compose cp mailbot:/data/backups ./mailbot-backups
 
 Restore only while the service is stopped. Preserve the current volume first, then copy one verified backup over the configured database path. Do not copy a live `mailbot.sqlite` file directly because WAL state may be missing.
 
+### Optional Telegram backup destination
+
+Use a dedicated private group or channel rather than the operational mailbox chat. Add the bot with permission to post files. In a private group, send `/chatid` as the authorized Telegram user, copy the negative ID, and set it as `BACKUP_TELEGRAM_CHAT_ID`; then recreate the container. Each successful local backup is gzip-compressed and sent silently. Telegram delivery failure never invalidates or removes the local backup. `/backup` shows both local and Telegram delivery timestamps.
+
+Downloaded files end in `.sqlite.gz`. Decompress before the normal stopped-service restore:
+
+```sh
+gunzip mailbot-CHOSEN.sqlite.gz
+```
+
+The database contains retained email bodies, AI results, Telegram IDs, drafts, and durable outbound content. Keep the destination private and restrict membership. No mailbox password, bot token, or AI API key is stored in SQLite.
+
 ```sh
 docker compose stop mailbot
 docker compose run --rm --no-deps --entrypoint sh mailbot -lc 'cp /data/backups/CHOSEN_BACKUP.sqlite /data/mailbot.sqlite'
@@ -111,5 +123,8 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Telegram polling is stale:** health returns `503` after two minutes without a successful poll. Verify host and container DNS resolution plus TCP/443 reachability to `api.telegram.org`; a successful IMAP connection alone is not sufficient health.
 - **SELinux denies `mail-rules.json`:** current Compose uses a private `Z` relabel on the read-only config bind mount. Keep the project/config path dedicated to this service on enforcing AlmaLinux/RHEL hosts.
 - **AI job is failed:** health reports job counts and provider status. A background analysis becomes terminal after five provider failures; the email remains fully usable and interactive Ask AI can be retried later.
+- **Telegram cleanup job is failed:** the source mail action is already complete and must not be repeated. Telegram message IDs remain durable; restore Bot API access and let the cleanup job retry or inspect `/failed`.
+- **Telegram backup is missing:** confirm `BACKUP_TELEGRAM_CHAT_ID`, bot posting rights, compressed size, and `/backup`. The local online backup remains authoritative.
+- **Operational status is needed:** use `/status`, `/accounts`, `/failed`, `/backup`, `/diagnose`, or `/sync`. Responses have a Close button and the original command is removed when the bot has deletion permission.
 - **AI returns the old greeting/closing:** version 0.3.1 normalizes generated output after the provider response. Confirm the running image/version and rebuild/redeploy; manually edited text is intentionally preserved verbatim.
 - **Restart loop:** inspect the first fatal log entry, validate `.env` with `docker compose config`, and test required destinations from inside the container.

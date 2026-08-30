@@ -27,6 +27,7 @@ Keep the user's independent IMAP Inboxes—including Exchange and Gmail—as one
 19. Every mail belongs to one immutable account; all reads, replies, forwards, calendar responses, Sent copies, and Archive moves use that account. IMAP identities and threads never collide across accounts.
 20. Provider-specific folder paths and authentication remain account configuration; Gmail uses App Password authentication and discovered Gmail folder paths without changing account routing semantics.
 21. A Voice instruction is accepted only as a direct reply to the exact mail-scoped ForceReply prompt. Audio is never persisted, transcription has bounded size/duration, configured ASR models run concurrently, and conservative consensus cannot bypass transcript review, draft review, or final send approval.
+22. IMAP/SMTP/Sent completion is durable before Telegram cleanup. A failed card deletion retries independently and can never repeat the completed mail operation.
 
 ## Telegram lifecycle
 
@@ -80,7 +81,7 @@ Keep the user's independent IMAP Inboxes—including Exchange and Gmail—as one
 
 Providers are ordered through `AI_PROVIDER_ORDER`, for example `proxy,ollama` or `ollama,proxy`. A proxy can contain an ordered model fallback through `AI_PROXY_MODEL_ORDER`. Analysis, Reply, Forward, and Ask AI use the same chain. Failure of every model/provider leaves the email usable without analysis. Email contents are never logged.
 
-All user-visible AI values use polished administrative Persian. Generated mail must use `با درود و مهر` instead of `با سلام و احترام`/`با سلام`, and `با سپاس` instead of `با تشکر`. The system prompt states this policy for every provider, and a deterministic output normalizer enforces the replacements and Persian `ی`/`ک` before display or sending. The model must not infer gender: unknown recipients receive neutral wording, while optional verified per-address titles may be configured locally. Direct manual edits remain exactly as entered by the user.
+All user-visible AI values use polished administrative Persian. Generated mail must use `با درود و مهر` instead of `با سلام و احترام`/`با سلام`, and `با سپاس` instead of `با تشکر`. The system prompt states this policy for every provider, and a deterministic output normalizer enforces the replacements and Persian `ی`/`ک` before display or sending. The model must not infer gender: unknown recipients receive neutral wording, while optional verified per-address titles may be configured locally. Direct manual edits remain exactly as entered by the user. Analysis cards may additionally show only grounded deadlines, amounts, key facts, risks, and URLs copied from the source email.
 
 The analysis contract is JSON containing importance, score, Persian summary, suggested action, optional deadline, reason, and `actionOwner` (`self`, `other`, `shared`, or `unknown`). Email content is untrusted data and must not override the system prompt or trusted local owner profile.
 

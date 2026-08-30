@@ -1,5 +1,5 @@
-import { mkdir, readdir, stat, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { createServer } from "node:http";
 import { loadConfig } from "./config.js";
 import { Logger } from "./logger.js";
@@ -14,6 +14,8 @@ import { loadHonorifics } from "./honorifics.js";
 import { loadUserProfile } from "./user-profile.js";
 import { loadMailAccountConfigs } from "./accounts.js";
 import { SpeechToTextService } from "./stt.js";
+import { BackupService } from "./backup.js";
+import { SafeScheduler } from "./scheduler.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -32,24 +34,8 @@ async function main(): Promise<void> {
   const rules = await MailRuleService.load(config.MAIL_RULES_PATH);
   const app = new MailBotApp(primary.config, store, imap, smtp, telegram, ai, logger, rules, runtimes.slice(1), stt);
 
-  const runBackup = async () => {
-    try {
-      await mkdir(config.BACKUP_DIR, { recursive: true });
-      const filename = `mailbot-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite`;
-      await store.backup(join(config.BACKUP_DIR, filename));
-      const files = (await readdir(config.BACKUP_DIR)).filter((name) => /^mailbot-.*\.sqlite$/.test(name));
-      const ordered = await Promise.all(files.map(async (name) => ({ name, modified: (await stat(join(config.BACKUP_DIR, name))).mtimeMs })));
-      for (const old of ordered.sort((a, b) => b.modified - a.modified).slice(config.BACKUP_RETENTION)) {
-        await unlink(join(config.BACKUP_DIR, old.name));
-      }
-      store.setKv("backup:last-success", new Date().toISOString());
-      store.deleteKv("backup:last-error");
-      logger.info("SQLite online backup completed", { filename, retention: config.BACKUP_RETENTION });
-    } catch (error) {
-      store.setKv("backup:last-error", error instanceof Error ? error.message : String(error));
-      logger.error("SQLite online backup failed", { error: error instanceof Error ? error.message : String(error) });
-    }
-  };
+  const backup = new BackupService(config, store, telegram, logger);
+  const scheduler = new SafeScheduler(logger);
 
   const health = createServer((_request, response) => {
     const status = app.status();
@@ -62,6 +48,7 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info("Shutting down", { signal });
     health.close();
+    scheduler.stop();
     await app.stop();
     store.close();
     process.exit(0);
@@ -74,8 +61,8 @@ async function main(): Promise<void> {
     sttModels: config.VOICE_REPLY_ENABLED ? config.sttModelOrder : [], mailRules: rules.count, accounts: runtimes.map((account) => account.id)
   });
   await app.start();
-  await runBackup();
-  setInterval(() => void runBackup(), config.BACKUP_INTERVAL_HOURS * 3_600_000).unref();
+  await backup.run();
+  scheduler.every("online-backup", config.BACKUP_INTERVAL_HOURS * 3_600_000, () => backup.run());
 }
 
 main().catch((error) => {

@@ -33,6 +33,14 @@ describe("mail card buttons", () => {
     const mail = { ...stored(1), analysis: { importance: "high" as const, score: 80, summaryFa: "خلاصه", suggestedAction: "شما بررسی کنید", reason: "درخواست مستقیم", provider: "test", actionOwner: "self" as const } };
     expect(renderMail(mail)).toContain("<b>اقدام شما:</b>");
   });
+  it("renders the structured action packet only when grounded fields exist", () => {
+    const mail = { ...stored(1), analysis: { importance: "high" as const, score: 85, summaryFa: "خلاصه", suggestedAction: "بررسی کنید", reason: "درخواست", provider: "test", deadline: "امروز ساعت ۱۴", amountsFa: ["۱۲۰ میلیون ریال"], keyFactsFa: ["نیازمند تأیید مالی"], riskFa: "تأخیر در ارسال سفارش", actionLinks: ["https://example.com/action"] } };
+    const rendered = renderMail(mail);
+    expect(rendered).toContain("⏳ مهلت:");
+    expect(rendered).toContain("💰 مبالغ:");
+    expect(rendered).toContain("نیازمند تأیید مالی");
+    expect(rendered).toContain("https://example.com/action");
+  });
 
   it("shows the source account on a combined Inbox card", () => {
     expect(renderMail({ ...stored(1), accountId: "secondary", accountLabel: "Axon" })).toContain("<b>حساب:</b> Axon");

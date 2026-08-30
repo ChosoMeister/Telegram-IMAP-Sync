@@ -11,7 +11,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - One Telegram card per exact RFC email thread; later Inbox replies replace the card at the bottom and show a chronological sectioned timeline
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
-- Persian priority, summary, suggested action, and deadline extraction
+- Grounded Persian action packets with priority, summary, owner-aware action, deadline, amounts, key facts, risk, and source-email action links
 - Deterministic `text/calendar` detection with structured Persian event cards for invitations, updates, and cancellations, independent of attachment filename
 - Exchange-compatible Accept/Tentative/Decline responses with durable SMTP, Sent-copy, Archive, and Telegram cleanup stages plus deterministic deadline-based calendar priority
 - Calendar-specific mobile UI: RSVP plus Done/Ask AI only, with same-card final confirmation before sending
@@ -19,13 +19,13 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - HTML-to-text handling with same-card pagination for the latest message or every merged Inbox message, plus Back navigation
 - On-demand real attachments with inline signature-image filtering
 - Multi-signal separation of real attachments from CID images, logos, icons, and signature assets, with an on-demand hidden-file review
-- Done: verified Exchange archive, then Telegram cleanup
+- Done: verified Exchange archive committed before independently retryable durable Telegram cleanup
 - Pending queue rotation every 36 hours, oldest-to-newest and silent
 - AI-assisted Reply and Reply All with tone, typed or Telegram Voice instruction, direct editing, and explicit approval
 - In-memory parallel Qwen/Whisper speech-to-text with automatic Persian-English code switching, conservative AI consensus, confidence/uncertainty review, exact ForceReply mail binding, and no retained audio
 - Exact ForceReply-to-mail binding, preventing text meant for one open draft/question from being applied to another
 - AI-assisted Forward to one or more recipients with a custom note and original attachments
-- Free-form Ask AI over the current message, extractable PDF/DOCX/text attachments, or the full mail thread
+- Free-form Ask AI over the current message, extractable PDF/DOCX/XLSX/text attachments across the pending thread, or the full mail thread; OCR is intentionally excluded
 - Thread discovery across Inbox, Archive, and Sent with AI status summary and thread-aware reply drafts
 - Gender-neutral AI addressing by default, with optional verified per-address Persian honorifics
 - Optional local owner profile so AI recognizes the user across their names and email addresses and renders self-assigned work as a direct `Your action`
@@ -41,7 +41,9 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Automatic IMAP reconnect with exponential backoff and disconnect-aware reconciliation
 - Telegram rate-limit/transient-failure backoff without unsafe message-send retries
 - SQLite recovery state, IMAP-aware health endpoint, structured redacted logs
-- Online SQLite backups with configurable retention
+- Online SQLite backups with configurable retention and optional gzip delivery to a dedicated private Telegram channel/group
+- Dismissible `/status`, `/sync`, `/accounts`, `/failed`, `/backup`, `/diagnose`, and `/chatid` operational commands
+- Overlap-safe periodic tasks plus Docker CPU, memory, and PID limits
 - Component health for AI, SMTP, Telegram, backup, queue, and IMAP plus completed-state retention
 - Multi-architecture Docker design for Linux, macOS, and Windows hosts
 
@@ -80,7 +82,7 @@ Published Linux `amd64`/`arm64` images are available from GitHub Container Regis
 
 ```sh
 docker pull ghcr.io/chosomeister/telegram-imap-sync:latest
-docker pull ghcr.io/chosomeister/telegram-imap-sync:0.11.2
+docker pull ghcr.io/chosomeister/telegram-imap-sync:0.12.0
 ```
 
 ## Windows installation (Docker Desktop)

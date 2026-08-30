@@ -51,6 +51,7 @@ export class TelegramApi {
   getMe(): Promise<{ id: number; username?: string; is_bot: boolean }> { return this.call("getMe", {}); }
   getChat(): Promise<{ id: number; type: string }> { return this.call("getChat", { chat_id: this.config.TELEGRAM_USER_ID }); }
   getWebhookInfo(): Promise<{ url: string; pending_update_count: number }> { return this.call("getWebhookInfo", {}); }
+  setMyCommands(commands: Array<{ command: string; description: string }>): Promise<boolean> { return this.call("setMyCommands", { commands }); }
 
   async downloadFile(fileId: string, maxBytes: number): Promise<{ content: Buffer; filePath: string }> {
     const file = await this.call<{ file_path?: string; file_size?: number }>("getFile", { file_id: fileId });
@@ -77,8 +78,12 @@ export class TelegramApi {
   }
 
   sendMessage(text: string, buttons?: Button[][], silent = false, forceReply = false): Promise<TelegramMessage> {
+    return this.sendMessageTo(this.config.TELEGRAM_USER_ID, text, buttons, silent, forceReply);
+  }
+
+  sendMessageTo(chatId: number, text: string, buttons?: Button[][], silent = false, forceReply = false): Promise<TelegramMessage> {
     return this.call("sendMessage", {
-      chat_id: this.config.TELEGRAM_USER_ID, text, disable_notification: silent,
+      chat_id: chatId, text, disable_notification: silent,
       parse_mode: "HTML", link_preview_options: { is_disabled: true },
       ...(forceReply ? { reply_markup: { force_reply: true, selective: true } } : buttons ? { reply_markup: { inline_keyboard: buttons } } : {})
     }, false);
@@ -103,9 +108,13 @@ export class TelegramApi {
   }
 
   async sendDocument(filename: string, content: Buffer, caption?: string): Promise<TelegramMessage> {
+    return this.sendDocumentTo(this.config.TELEGRAM_USER_ID, filename, content, caption);
+  }
+
+  async sendDocumentTo(chatId: number, filename: string, content: Buffer, caption?: string): Promise<TelegramMessage> {
     for (let attempt = 0; attempt < 4; attempt++) {
       const form = new FormData();
-      form.set("chat_id", String(this.config.TELEGRAM_USER_ID));
+      form.set("chat_id", String(chatId));
       if (caption) form.set("caption", caption);
       form.set("document", new Blob([new Uint8Array(content)]), filename);
       const response = await fetch(`${this.base}/sendDocument`, {

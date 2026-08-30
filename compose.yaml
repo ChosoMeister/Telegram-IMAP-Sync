@@ -3,6 +3,11 @@ services:
     build: .
     image: telegram-imap-sync:local
     restart: unless-stopped
+    init: true
+    mem_limit: 1536m
+    cpus: 1.5
+    pids_limit: 256
+    stop_grace_period: 30s
     env_file:
       - .env
     volumes:

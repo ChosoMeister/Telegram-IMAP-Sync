@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { canExtractAttachment, extractAttachmentText } from "../src/mail/extract.js";
+import ExcelJS from "exceljs";
 
 describe("attachment text extraction", () => {
+  it("extracts bounded worksheet text from XLSX without an AI model", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Invoices");
+    sheet.addRow(["Invoice", "Amount"]);
+    sheet.addRow(["A-123", 450000]);
+    const content = Buffer.from(await workbook.xlsx.writeBuffer());
+    expect(canExtractAttachment("invoices.xlsx", "application/octet-stream")).toBe(true);
+    const extracted = await extractAttachmentText("invoices.xlsx", "application/octet-stream", content);
+    expect(extracted).toContain("SHEET: Invoices");
+    expect(extracted).toContain("A-123\t450000");
+  });
   it("extracts UTF-8 text and CSV without persisting files", async () => {
     await expect(extractAttachmentText("notes.txt", "text/plain", Buffer.from("سلام دنیا"))).resolves.toBe("سلام دنیا");
     await expect(extractAttachmentText("invoice.csv", "text/csv", Buffer.from("item,amount\nA,100"))).resolves.toContain("A,100");
