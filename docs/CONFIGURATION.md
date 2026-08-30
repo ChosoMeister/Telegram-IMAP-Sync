@@ -13,6 +13,7 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `BACKUP_INTERVAL_HOURS` | `24` | Backup frequency; minimum 1. |
 | `BACKUP_RETENTION` | `7` | Number of newest online backups retained. |
 | `BACKUP_TELEGRAM_CHAT_ID` | unset | Optional private channel/group ID receiving a gzip-compressed copy after each successful local backup. Keep this separate from the operational bot chat. |
+| `BACKUP_TELEGRAM_MESSAGE_THREAD_ID` | unset | Optional forum-topic ID inside the configured backup group. For a topic URL ending in `/15`, use `15`. |
 | `BACKUP_TELEGRAM_MAX_BYTES` | `49000000` | Skip Telegram delivery when the compressed backup exceeds this size; the valid local backup is retained. Maximum 50 MB. |
 | `DATA_RETENTION_DAYS` | `90` | Deletes only completed local SQLite records after this age; Exchange messages remain untouched. |
 | `MAIL_RULES_PATH` | unset | JSON rule file, normally `/app/config/mail-rules.json`. |

@@ -111,10 +111,11 @@ export class TelegramApi {
     return this.sendDocumentTo(this.config.TELEGRAM_USER_ID, filename, content, caption);
   }
 
-  async sendDocumentTo(chatId: number, filename: string, content: Buffer, caption?: string): Promise<TelegramMessage> {
+  async sendDocumentTo(chatId: number, filename: string, content: Buffer, caption?: string, messageThreadId?: number): Promise<TelegramMessage> {
     for (let attempt = 0; attempt < 4; attempt++) {
       const form = new FormData();
       form.set("chat_id", String(chatId));
+      if (messageThreadId !== undefined) form.set("message_thread_id", String(messageThreadId));
       if (caption) form.set("caption", caption);
       form.set("document", new Blob([new Uint8Array(content)]), filename);
       const response = await fetch(`${this.base}/sendDocument`, {

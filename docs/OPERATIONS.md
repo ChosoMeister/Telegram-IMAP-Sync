@@ -61,7 +61,7 @@ Restore only while the service is stopped. Preserve the current volume first, th
 
 ### Optional Telegram backup destination
 
-Use a dedicated private group or channel rather than the operational mailbox chat. Add the bot with permission to post files. In a private group, send `/chatid` as the authorized Telegram user, copy the negative ID, and set it as `BACKUP_TELEGRAM_CHAT_ID`; then recreate the container. Each successful local backup is gzip-compressed and sent silently. Telegram delivery failure never invalidates or removes the local backup. `/backup` shows both local and Telegram delivery timestamps.
+Use a dedicated private group or channel rather than the operational mailbox chat. Add the bot with permission to post files. In a private group, send `/chatid` as the authorized Telegram user, copy the negative ID, and set it as `BACKUP_TELEGRAM_CHAT_ID`. For a forum topic, set `BACKUP_TELEGRAM_MESSAGE_THREAD_ID` to the final topic number in its URL (for example, a URL ending in `/15` uses `15`). Recreate the container after changing either value. Each successful local backup is gzip-compressed and sent silently. Telegram delivery failure never invalidates or removes the local backup. `/backup` shows both local and Telegram delivery timestamps.
 
 Downloaded files end in `.sqlite.gz`. Decompress before the normal stopped-service restore:
 

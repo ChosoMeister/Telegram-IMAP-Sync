@@ -13,10 +13,10 @@ describe("online backup", () => {
     const store = new Store(join(directory, "live.sqlite"));
     store.upsertMail(incoming);
     const telegram = { sendDocumentTo: vi.fn().mockResolvedValue({ message_id: 1 }) };
-    const service = new BackupService({ ...config, BACKUP_DIR: directory, BACKUP_RETENTION: 2, BACKUP_TELEGRAM_CHAT_ID: -100123, BACKUP_TELEGRAM_MAX_BYTES: 49_000_000 } as any, store, telegram as any, new Logger("error"));
+    const service = new BackupService({ ...config, BACKUP_DIR: directory, BACKUP_RETENTION: 2, BACKUP_TELEGRAM_CHAT_ID: -100123, BACKUP_TELEGRAM_MESSAGE_THREAD_ID: 15, BACKUP_TELEGRAM_MAX_BYTES: 49_000_000 } as any, store, telegram as any, new Logger("error"));
     await service.run();
     expect((await readdir(directory)).some((name) => name.endsWith(".sqlite") && name !== "live.sqlite")).toBe(true);
-    expect(telegram.sendDocumentTo).toHaveBeenCalledWith(-100123, expect.stringMatching(/\.sqlite\.gz$/), expect.any(Buffer), expect.any(String));
+    expect(telegram.sendDocumentTo).toHaveBeenCalledWith(-100123, expect.stringMatching(/\.sqlite\.gz$/), expect.any(Buffer), expect.any(String), 15);
     expect(store.getKv("backup:telegram-last-success")).toBeTruthy();
     store.close();
     await rm(directory, { recursive: true, force: true });

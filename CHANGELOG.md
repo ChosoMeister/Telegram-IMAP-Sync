@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.12.1 - 2026-08-30
+
+- Allow Telegram database backups to target a specific forum topic through `BACKUP_TELEGRAM_MESSAGE_THREAD_ID`.
+
 ## 0.12.0 - 2026-08-30
 
 - Update the proxy defaults and examples to the deployed `local-gpt-oss-120b` and `local-gemma4-26b` model names.

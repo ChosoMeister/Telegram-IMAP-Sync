@@ -46,7 +46,10 @@ export class BackupService {
         throw new Error(`Compressed backup is ${compressedSize} bytes; Telegram limit is configured as ${this.config.BACKUP_TELEGRAM_MAX_BYTES} bytes`);
       }
       const { readFile } = await import("node:fs/promises");
-      await this.telegram.sendDocumentTo(this.config.BACKUP_TELEGRAM_CHAT_ID!, `${filename}.gz`, await readFile(compressedPath), "نسخه پشتیبان MailBot");
+      await this.telegram.sendDocumentTo(
+        this.config.BACKUP_TELEGRAM_CHAT_ID!, `${filename}.gz`, await readFile(compressedPath),
+        "نسخه پشتیبان MailBot", this.config.BACKUP_TELEGRAM_MESSAGE_THREAD_ID
+      );
       this.store.setKv("backup:telegram-last-success", new Date().toISOString());
       this.store.deleteKv("backup:telegram-last-error");
       this.logger.info("Compressed backup sent to Telegram", { filename: `${filename}.gz`, compressedSize });
