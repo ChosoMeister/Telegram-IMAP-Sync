@@ -59,4 +59,4 @@ docker compose logs -f --tail 100
 - [راه‌اندازی Gmail و Google Workspace](docs/GMAIL.md)
 - [چک‌لیست نگهداری مستندات و انتشار](docs/MAINTENANCE.md)
 
-وضعیت سرویس روی `http://127.0.0.1:18080/` است و هنگام قطع IMAP هر حساب یا توقف موفق Poll تلگرام برای بیش از دو دقیقه کد `503` می‌دهد. پاسخ health اتصال، Inbox، Sync و SMTP هر حساب را جداگانه و وضعیت Telegram، AI، STT، backup و صف را یکجا نشان می‌دهد. دستور `/status` نیز خلاصه هر حساب را نمایش می‌دهد. تصویرهای `amd64` و `arm64` با tagهای `latest`، نسخه `0.13.0` و commit در `ghcr.io/chosomeister/telegram-imap-sync` منتشر می‌شوند.
+وضعیت سرویس روی `http://127.0.0.1:18080/` است و هنگام قطع IMAP هر حساب یا توقف موفق Poll تلگرام برای بیش از دو دقیقه کد `503` می‌دهد. پاسخ health اتصال، Inbox، Sync و SMTP هر حساب را جداگانه و وضعیت Telegram، AI، STT، backup و صف را یکجا نشان می‌دهد. دستور `/status` نیز خلاصه هر حساب را نمایش می‌دهد. تصویرهای `amd64` و `arm64` با tagهای `latest`، نسخه `0.13.1` و commit در `ghcr.io/chosomeister/telegram-imap-sync` منتشر می‌شوند.

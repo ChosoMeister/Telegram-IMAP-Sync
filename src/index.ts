@@ -61,8 +61,8 @@ async function main(): Promise<void> {
     sttModels: config.VOICE_REPLY_ENABLED ? config.sttModelOrder : [], mailRules: rules.count, accounts: runtimes.map((account) => account.id)
   });
   await app.start();
-  await backup.run();
-  scheduler.every("online-backup", config.BACKUP_INTERVAL_HOURS * 3_600_000, () => backup.run());
+  await backup.runIfDue();
+  scheduler.every("online-backup-due-check", 3_600_000, async () => { await backup.runIfDue(); });
 }
 
 main().catch((error) => {

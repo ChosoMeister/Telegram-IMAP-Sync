@@ -20,6 +20,8 @@ describe("online backup", () => {
     expect(backupName).toBeTruthy();
     expect(telegram.sendDocumentTo).toHaveBeenCalledWith(-100123, expect.stringMatching(/\.sqlite\.gz$/), expect.any(Buffer), expect.any(String), 15);
     expect(store.getKv("backup:telegram-last-success")).toBeTruthy();
+    expect(await service.runIfDue(new Date())).toBe(false);
+    expect(telegram.sendDocumentTo).toHaveBeenCalledTimes(1);
     store.close();
     const restored = new Store(join(directory, backupName!));
     expect(restored.listLearnedRules()).toHaveLength(1);

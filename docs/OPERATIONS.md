@@ -50,7 +50,7 @@ docker compose restart mailbot
 
 ## Backup and restore
 
-The application creates a WAL-safe online backup under `/data/backups` every `BACKUP_INTERVAL_HOURS`; the newest `BACKUP_RETENTION` files remain. Copy backups to independent host storage:
+The application creates a WAL-safe online backup under `/data/backups` after the last successful backup becomes `BACKUP_INTERVAL_HOURS` old; the newest `BACKUP_RETENTION` files remain. Startup and an hourly due check do not create extra files while a recent successful backup exists. A failed due backup is retried by the next hourly check. Copy backups to independent host storage:
 
 ```sh
 docker compose exec mailbot sh -lc 'ls -lah /data/backups'

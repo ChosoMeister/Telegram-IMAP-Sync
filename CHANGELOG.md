@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.13.1 - 2026-08-30
+
+- Make backup scheduling success-age based: restarts no longer create extra local/Telegram backups before the configured 24-hour interval, while failed due backups retry on the next hourly check.
+
 ## 0.13.0 - 2026-08-30
 
 - Add user-confirmed, account-scoped learned analysis rules for importance, action ownership, and informational mail.

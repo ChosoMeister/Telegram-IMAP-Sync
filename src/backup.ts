@@ -12,6 +12,15 @@ import { describeError } from "./errors.js";
 export class BackupService {
   constructor(private config: AppConfig, private store: Store, private telegram: TelegramApi, private logger: Logger) {}
 
+  async runIfDue(now = new Date()): Promise<boolean> {
+    const lastSuccess = this.store.getKv("backup:last-success");
+    const lastSuccessMs = lastSuccess ? Date.parse(lastSuccess) : Number.NaN;
+    const intervalMs = this.config.BACKUP_INTERVAL_HOURS * 3_600_000;
+    if (Number.isFinite(lastSuccessMs) && now.getTime() - lastSuccessMs < intervalMs) return false;
+    await this.run();
+    return true;
+  }
+
   async run(): Promise<void> {
     try {
       await mkdir(this.config.BACKUP_DIR, { recursive: true });
