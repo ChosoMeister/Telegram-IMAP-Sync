@@ -17,4 +17,11 @@ describe("validated conversation plans", () => {
   it("requires a short clarification question when the target is ambiguous", () => {
     expect(() => parseConversationPlan({ summaryFa: "مبهم", needsClarification: true, actions: [] })).toThrow();
   });
+  it("accepts only structured memory fields for an explicit user correction", () => {
+    const plan = parseConversationPlan({ summaryFa: "ثبت اصلاح", needsClarification: false, actions: [{
+      kind: "remember", target: "this_mail", memoryKind: "correction", key: "finance_cc_role",
+      statement: "در مکاتبات مالی این حساب فقط ناظر هستم", scope: "account"
+    }] });
+    expect(plan.actions[0]).toMatchObject({ kind: "remember", memoryKind: "correction", scope: "account" });
+  });
 });

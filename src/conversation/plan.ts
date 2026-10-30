@@ -7,6 +7,10 @@ const actionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("draft_reply"), target: targetSchema, instruction: z.string().trim().min(1).max(1500),
     tone: z.enum(["formal", "short", "friendly"]).default("formal"), replyAll: z.boolean().default(false) }),
   z.object({ kind: z.literal("draft_forward"), target: targetSchema, instruction: z.string().trim().max(1500).default("") }),
+  z.object({ kind: z.literal("remember"), target: targetSchema,
+    memoryKind: z.enum(["preference", "role", "correction", "pattern", "exception", "permission"]),
+    key: z.string().trim().min(1).max(120), statement: z.string().trim().min(1).max(1000),
+    scope: z.enum(["global", "account"]) }),
   z.object({ kind: z.literal("cancel"), target: targetSchema })
 ]);
 

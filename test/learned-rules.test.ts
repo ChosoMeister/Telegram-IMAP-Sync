@@ -21,7 +21,7 @@ describe("learned analysis rules", () => {
     store.close();
   });
 
-  it("uses the most specific account-scoped rule and keeps informational mail low", () => {
+  it("keeps informational/action ownership independent from importance and risk", () => {
     const store = new Store(":memory:");
     const service = new LearnedRuleService(store);
     const { id } = store.upsertMail({ ...incoming, accountId: "orchid", accountLabel: "Orchid", subject: "FW: Daily Report" });
@@ -32,10 +32,20 @@ describe("learned analysis rules", () => {
     store.saveLearnedRule({ accountId: "axon", scope: "sender", senderEmail: "sender@example.com", effect: "importance", effectValue: "critical" });
 
     const result = service.applyMatching(mail, baseAnalysis);
-    expect(result).toMatchObject({ importance: "low", score: 25, category: "informational", actionOwner: "other" });
-    expect(result.riskFa).toBeUndefined();
+    expect(result).toMatchObject({ importance: "low", score: 25, category: "informational", actionOwner: "other", riskFa: "تأخیر" });
     expect(result.appliedRuleIds).toEqual(expect.arrayContaining([specific.id, informational.id]));
-    expect(service.trustedGuidance(mail)).toContain("Verified user rule");
+    expect(service.trustedGuidance(mail)).toContain("requires no direct action");
+    expect(service.trustedGuidance(mail)).not.toContain("importance must stay low");
+    store.close();
+  });
+
+  it("does not downgrade a critical FYI alert without a separate importance rule", () => {
+    const store = new Store(":memory:");
+    const service = new LearnedRuleService(store);
+    const { id } = store.upsertMail({ ...incoming, accountId: "orchid", subject: "SSL certificate expires tomorrow" });
+    store.saveLearnedRule({ accountId: "orchid", scope: "sender", senderEmail: "sender@example.com", effect: "informational" });
+    const result = service.applyMatching(store.getMail(id)!, { ...baseAnalysis, importance: "critical", score: 98, riskFa: "قطع سرویس" });
+    expect(result).toMatchObject({ importance: "critical", score: 98, category: "informational", riskFa: "قطع سرویس" });
     store.close();
   });
 

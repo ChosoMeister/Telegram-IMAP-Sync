@@ -29,6 +29,7 @@ function setup(archive = vi.fn().mockResolvedValue(undefined), appMode: "dry-run
       if (request.includes("مبهم") && !request.includes("توضیح کاربر")) return { summaryFa: "ابهام", needsClarification: true, clarificationQuestion: "منظورتان پاسخ است یا آرشیو؟", actions: [] };
       if (request.includes("آرشیو")) return { summaryFa: "آرشیو", needsClarification: false, actions: [{ kind: "archive", target: "this_mail" }] };
       if (request.includes("بهش بگو")) return { summaryFa: "پیش‌نویس", needsClarification: false, actions: [{ kind: "draft_reply", target: "this_mail", instruction: request, tone: "formal", replyAll: false }] };
+      if (request.includes("یادت باشه")) return { summaryFa: "ثبت حافظه", needsClarification: false, actions: [{ kind: "remember", target: "this_mail", memoryKind: "role", key: "finance_role", statement: "در مکاتبات مالی فقط ناظر هستم", scope: "account" }] };
       return { summaryFa: "پرسش", needsClarification: false, actions: [{ kind: "ask", target: "this_mail", question: request }] };
     }),
     draftReply: vi.fn().mockResolvedValue("پیش‌نویس صوتی"), draftForward: vi.fn().mockResolvedValue("متن فوروارد"),
@@ -106,6 +107,30 @@ describe("Done transaction", () => {
     expect(s.store.getConversation(42, s.id)).toBeUndefined();
     s.store.close();
   });
+  it("records an explicit account-scoped memory and exposes it to later analysis", async () => {
+    const s = setup();
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    await (s.app as any).handleText({ message_id: 908, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 100 }, text: "یادت باشه در مکاتبات مالی فقط ناظر هستم" });
+    expect(s.store.listMemories()).toEqual([expect.objectContaining({ kind: "role", key: "finance_role", scope: "account", confidence: "confirmed",
+      statement: "در مکاتبات مالی فقط ناظر هستم" })]);
+    const future = s.store.upsertMail({ ...incoming, uid: 18, messageId: "<memory-future@example.com>" });
+    s.store.enqueueJob("analyze", future.id);
+    s.ai.analyze.mockResolvedValueOnce({ importance: "normal", score: 50, summaryFa: "آتی", suggestedAction: "بررسی", reason: "مدل", provider: "proxy:test" });
+    await (s.app as any).processJobs();
+    expect(s.ai.analyze).toHaveBeenCalledWith(expect.objectContaining({ id: future.id }), expect.stringContaining("در مکاتبات مالی فقط ناظر هستم"));
+    s.store.close();
+  });
+  it("lists and disables confirmed memory through /memory", async () => {
+    const s = setup();
+    const memory = s.store.saveMemory({ kind: "preference", key: "tone", statement: "پاسخ رسمی باشد", scope: "global",
+      confidence: "confirmed", source: "user" });
+    await (s.app as any).handleText({ message_id: 909, chat: { id: 42 }, from: { id: 42 }, text: "/memory" });
+    expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining("پاسخ رسمی باشد"), expect.any(Array), true);
+    await (s.app as any).handleSystemCallback("toggle-memory", `sys:memory:${memory.id}:toggle`, 200);
+    expect(s.store.getMemory(memory.id)?.status).toBe("disabled");
+    s.store.close();
+  });
   it("renders operational commands as dismissible messages and removes the typed command", async () => {
     const s = setup();
     await (s.app as any).handleText({ message_id: 900, chat: { id: 42 }, from: { id: 42 }, text: "/failed" });
@@ -139,8 +164,7 @@ describe("Done transaction", () => {
 
     await (s.app as any).handleCallback("menu", `m:${s.id}:feedback`);
     await (s.app as any).handleCallback("choice", `m:${s.id}:fbinformational`);
-    expect(s.store.getMail(s.id)?.analysis).toMatchObject({ importance: "low", score: 30, category: "informational", userCorrected: true });
-    expect(s.store.getMail(s.id)?.analysis?.riskFa).toBeUndefined();
+    expect(s.store.getMail(s.id)?.analysis).toMatchObject({ importance: "high", score: 85, category: "informational", userCorrected: true, riskFa: "تأخیر" });
 
     await (s.app as any).handleCallback("scope", `m:${s.id}:fbsender`);
     expect(s.store.listLearnedRules()).toHaveLength(0);
@@ -153,7 +177,7 @@ describe("Done transaction", () => {
     s.ai.analyze.mockResolvedValueOnce({ importance: "critical", score: 98, summaryFa: "جدید", suggestedAction: "فوری", reason: "مدل", provider: "proxy:test", actionOwner: "self", riskFa: "ریسک" });
     await (s.app as any).processJobs();
     expect(s.ai.analyze).toHaveBeenCalledWith(expect.objectContaining({ id: future.id }), expect.stringContaining("informational"));
-    expect(s.store.getMail(future.id)?.analysis).toMatchObject({ importance: "low", score: 30, category: "informational", actionOwner: "other" });
+    expect(s.store.getMail(future.id)?.analysis).toMatchObject({ importance: "critical", score: 98, category: "informational", actionOwner: "other", riskFa: "ریسک" });
     s.store.close();
   });
 

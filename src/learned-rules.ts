@@ -41,7 +41,7 @@ export class LearnedRuleService {
     return rules.map((rule) => {
       if (rule.effect === "importance") return `Verified user rule #${rule.id}: importance must be ${rule.effectValue}.`;
       if (rule.effect === "not_mine") return `Verified user rule #${rule.id}: the requested action is not owned by the mailbox owner.`;
-      return `Verified user rule #${rule.id}: this is informational and requires no direct action from the mailbox owner; importance must stay low.`;
+      return `Verified user rule #${rule.id}: this is informational and requires no direct action from the mailbox owner. This says nothing about importance, urgency, risk, or notification level.`;
     }).join("\n");
   }
 
@@ -103,10 +103,8 @@ export class LearnedRuleService {
         suggestedAction: "اقدام اصلی این ایمیل بر عهده شما نیست؛ در صورت نیاز فقط روند آن را پیگیری کنید."
       };
     }
-    const corrected = { ...analysis };
-    delete corrected.riskFa;
     return {
-      ...corrected, importance: "low", score: Math.min(analysis.score, 30), category: "informational", actionOwner: "other",
+      ...analysis, category: "informational", actionOwner: "other",
       suggestedAction: "این پیام صرفاً اطلاع‌رسانی است و اقدام مستقیمی از شما نمی‌خواهد."
     };
   }
@@ -118,7 +116,7 @@ export function normalizeSubject(subject: string): string {
 
 export function effectLabel(effect: LearnedRuleEffect, value?: string): string {
   if (effect === "not_mine") return "اقدام مربوط به من نیست";
-  if (effect === "informational") return "صرفاً اطلاع‌رسانی، حداکثر ۳۰";
+  if (effect === "informational") return "صرفاً اطلاع‌رسانی؛ مستقل از اهمیت";
   return `اهمیت ${importanceLabel(value)}`;
 }
 

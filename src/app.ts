@@ -23,6 +23,7 @@ import { DurableJobWorker } from "./jobs.js";
 import { effectLabel, LearnedRuleService, type FeedbackChoice, type RuleProposal } from "./learned-rules.js";
 import { planConversation } from "./conversation/planner.js";
 import type { ConversationPlan, ConversationPlanAction } from "./conversation/plan.js";
+import { MemoryService } from "./memory.js";
 
 export class MailBotApp {
   private readonly startedAt = new Date();
@@ -38,6 +39,7 @@ export class MailBotApp {
   private readonly scheduler: SafeScheduler;
   private readonly jobs: DurableJobWorker;
   private readonly learnedRules: LearnedRuleService;
+  private readonly memory: MemoryService;
   constructor(
     private config: MailAccountAppConfig, private store: Store, private imap: ImapService,
     private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger,
@@ -47,8 +49,10 @@ export class MailBotApp {
     this.primaryAccountId = this.accounts[0]!.id;
     this.scheduler = new SafeScheduler(logger);
     this.learnedRules = new LearnedRuleService(store);
+    this.memory = new MemoryService(store);
     this.jobs = new DurableJobWorker(store, async (mail) => {
-      const analysis = await ai.analyze(mail, this.learnedRules.trustedGuidance(mail));
+      const guidance = [this.learnedRules.trustedGuidance(mail), this.memory.trustedGuidance(mail)].filter(Boolean).join("\n");
+      const analysis = await ai.analyze(mail, guidance || undefined);
       return analysis ? this.learnedRules.applyMatching(mail, analysis) : undefined;
     }, telegram, logger, async (mailId) => {
       const representative = this.store.threadRepresentative(mailId);
@@ -73,6 +77,7 @@ export class MailBotApp {
       { command: "failed", description: "عملیات ناموفق" },
       { command: "backup", description: "وضعیت نسخه پشتیبان" },
       { command: "rules", description: "مدیریت قواعد یادگرفته‌شده" },
+      { command: "memory", description: "حافظه تأییدشده دستیار" },
       { command: "diagnose", description: "گزارش کامل سلامت" },
       { command: "chatid", description: "نمایش شناسه چت برای Backup" }
     ]).catch((error) => this.logger.warn("Could not register Telegram commands", { error: describeError(error) }));
@@ -112,6 +117,7 @@ export class MailBotApp {
       lastTelegramPoll: this.lastTelegramPoll?.toISOString(), inboxCount: [...this.inboxCount.values()].reduce((sum, count) => sum + count, 0),
       jobs: this.store.jobCounts(), ai: this.ai.status(), stt: this.stt?.status() ?? { enabled: false }, smtp: this.smtp.status(), telegram: this.telegram.status(),
       learnedRules: { total: learnedRules.length, enabled: learnedRules.filter((rule) => rule.enabled).length },
+      memory: { active: this.memory.list().length, confirmed: this.memory.list().filter((item) => item.confidence === "confirmed").length },
       backup: {
         lastSuccess: this.store.getKv("backup:last-success"), lastError: this.store.getKv("backup:last-error"),
         telegramLastSuccess: this.store.getKv("backup:telegram-last-success"), telegramLastError: this.store.getKv("backup:telegram-last-error")
@@ -358,6 +364,12 @@ export class MailBotApp {
     if (ruleMatch && messageId) {
       this.learnedRules.toggle(Number(ruleMatch[1]));
       const rendered = this.renderRulesCommand();
+      await this.telegram.editMessage(messageId, rendered.text, rendered.buttons);
+    }
+    const memoryMatch = /^sys:memory:(\d+):toggle$/.exec(data);
+    if (memoryMatch && messageId) {
+      this.memory.toggle(Number(memoryMatch[1]));
+      const rendered = this.renderMemoryCommand();
       await this.telegram.editMessage(messageId, rendered.text, rendered.buttons);
     }
   }
@@ -861,6 +873,11 @@ export class MailBotApp {
       await this.sendCommandResult(message, rendered.text, rendered.buttons);
       return;
     }
+    if (command === "/memory") {
+      const rendered = this.renderMemoryCommand();
+      await this.sendCommandResult(message, rendered.text, rendered.buttons);
+      return;
+    }
     if (command === "/diagnose") {
       const status = this.status();
       await this.sendCommandResult(message, [
@@ -1065,6 +1082,20 @@ export class MailBotApp {
         await this.startForward(mail, action.instruction, planId);
         this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete", { awaitingRecipients: true });
         return;
+      } else if (action.kind === "remember") {
+        const requestText = this.store.getConversationPlan(planId)?.requestText ?? "";
+        const explicit = this.isExplicitMemoryStatement(requestText);
+        const memory = this.memory.remember({ kind: action.memoryKind, key: action.key,
+          statement: explicit ? this.explicitMemoryStatement(requestText) : action.statement,
+          scope: action.scope, ...(action.scope === "account" ? { accountId: mail.accountId ?? this.primaryAccountId } : {}),
+          confidence: explicit ? "confirmed" : "inferred", source: explicit ? "user" : "model", sourceMailId: mail.id, sourcePlanId: planId });
+        this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete", { memoryId: memory.id, confidence: memory.confidence });
+        await this.editPrimary(mail, explicit
+          ? `🧠 یاد گرفتم: ${esc(memory.statement)}`
+          : `🧠 این برداشت به‌عنوان فرض تأییدنشده ثبت شد و تا تأیید شما روی تصمیم‌ها اثر نمی‌گذارد: ${esc(memory.statement)}`, [[
+          { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
+        ]]);
+        return;
       }
       this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete");
     } catch (error) {
@@ -1112,6 +1143,28 @@ export class MailBotApp {
       actions: [{ kind: "draft_forward", target: "this_mail", instruction: request }] };
     return { summaryFa: "پاسخ به پرسش درباره ایمیل", needsClarification: false,
       actions: [{ kind: "ask", target: "this_mail", question: intent.question }] };
+  }
+
+  private isExplicitMemoryStatement(text: string): boolean {
+    return /(یادت (?:باشه|بماند)|از این به بعد|همیشه|قاعده|قانون|فقط برای|این برداشت.*اشتباه|اصلاحش کن|من .* هستم)/u.test(text);
+  }
+
+  private explicitMemoryStatement(text: string): string {
+    return text.replace(/^(?:لطفاً\s+)?(?:یادت (?:باشه|بماند)(?:\s+که)?|از این به بعد(?:\s+بدان)?|این قانون(?:\s+را)?(?:\s+ثبت کن)?)[\s:،-]*/u, "").trim().slice(0, 1000) || text.trim().slice(0, 1000);
+  }
+
+  private renderMemoryCommand(): { text: string; buttons: Array<Array<{ text: string; callback_data: string }>> } {
+    const memories = this.store.listMemories(true);
+    if (!memories.length) return { text: "🧠 هنوز حافظه ساخت‌یافته‌ای ثبت نشده است.", buttons: [] };
+    return {
+      text: ["<b>حافظه دستیار</b>", ...memories.slice(0, 20).map((memory) =>
+        `${memory.status === "active" ? "✅" : memory.status === "superseded" ? "↪️" : "⏸"} #${memory.id} — ${esc(memory.statement)}\n${memory.scope === "global" ? "همه حساب‌ها" : esc(memory.accountId ?? "حساب")} · ${memory.confidence === "confirmed" ? "تأییدشده" : "استنباطی"}`
+      )].join("\n\n"),
+      buttons: memories.filter((memory) => memory.status !== "superseded").slice(0, 10).map((memory) => [{
+        text: `${memory.status === "active" ? "⏸" : "▶️"} #${memory.id}`,
+        callback_data: `sys:memory:${memory.id}:toggle`
+      }])
+    };
   }
 
   private renderImapMode(status?: { connectionState?: string; notificationMode?: string }): string {

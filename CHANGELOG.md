@@ -12,6 +12,8 @@
 - Route direct Reply-to-card Persian intents to bounded Ask, Reply, Reply All, Forward, Cancel, and exact-snapshot Archive actions.
 - Replace the first-stage router with an AI-backed, schema-validated plan containing only symbolic bounded actions; persist plans, clarification state, and per-action results in SQLite.
 - Execute clear conversational Archive commands against the immutable selected snapshot without including later thread replies, while keeping all generated email drafts behind the existing final-send approval.
+- Add sourced global/account assistant memories with confirmed/inferred confidence, superseding corrections, trusted analysis guidance, and `/memory` controls.
+- Decouple informational/action-ownership feedback from importance, score, risk, and notification urgency so critical FYI alerts remain critical.
 
 ## Unreleased
 

@@ -96,6 +96,28 @@ export interface LearnedRule {
   updatedAt: string;
 }
 
+export type MemoryKind = "preference" | "role" | "correction" | "pattern" | "exception" | "permission";
+export type MemoryScope = "global" | "account";
+export type MemoryConfidence = "confirmed" | "inferred";
+export type MemoryStatus = "active" | "superseded" | "disabled";
+
+export interface MemoryRecord {
+  id: number;
+  kind: MemoryKind;
+  key: string;
+  statement: string;
+  scope: MemoryScope;
+  accountId?: string;
+  confidence: MemoryConfidence;
+  source: "user" | "model" | "migration";
+  sourceMailId?: number;
+  sourcePlanId?: number;
+  status: MemoryStatus;
+  supersedesId?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface StoredMail extends IncomingMail {
   id: number;
   state: MailState;

@@ -1,5 +1,5 @@
 import { backup, DatabaseSync } from "node:sqlite";
-import type { Analysis, IncomingMail, LearnedRule, LearnedRuleEffect, LearnedRuleScope, StoredMail } from "./domain/types.js";
+import type { Analysis, IncomingMail, LearnedRule, LearnedRuleEffect, LearnedRuleScope, MemoryRecord, StoredMail } from "./domain/types.js";
 import { deriveThreadKey } from "./mail/thread.js";
 
 interface MailRow {
@@ -273,6 +273,27 @@ export class Store {
         UNIQUE(plan_id,action_index)
       );
       CREATE INDEX conversation_plans_mail_idx ON conversation_plans(mail_id,created_at);
+    `);
+    this.applyMigration(8, `
+      CREATE TABLE assistant_memories (
+        id INTEGER PRIMARY KEY,
+        kind TEXT NOT NULL CHECK(kind IN ('preference','role','correction','pattern','exception','permission')),
+        memory_key TEXT NOT NULL,
+        statement TEXT NOT NULL,
+        scope TEXT NOT NULL CHECK(scope IN ('global','account')),
+        account_id TEXT NOT NULL DEFAULT '',
+        confidence TEXT NOT NULL CHECK(confidence IN ('confirmed','inferred')),
+        source TEXT NOT NULL CHECK(source IN ('user','model','migration')),
+        source_mail_id INTEGER REFERENCES mails(id) ON DELETE SET NULL,
+        source_plan_id INTEGER REFERENCES conversation_plans(id) ON DELETE SET NULL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','superseded','disabled')),
+        supersedes_id INTEGER REFERENCES assistant_memories(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE UNIQUE INDEX assistant_memories_active_key_idx
+        ON assistant_memories(kind,memory_key,scope,account_id) WHERE status='active';
+      CREATE INDEX assistant_memories_guidance_idx ON assistant_memories(status,confidence,scope,account_id);
     `);
     for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
       const mail = JSON.parse(row.payload_json) as IncomingMail;
@@ -652,6 +673,62 @@ export class Store {
     return (this.db.prepare("SELECT * FROM conversation_tool_results WHERE plan_id=? ORDER BY action_index").all(planId) as unknown as any[])
       .map((row) => ({ actionIndex: row.action_index, kind: row.kind, state: row.state,
         result: JSON.parse(row.result_json) as Record<string, unknown> }));
+  }
+
+  saveMemory(input: Omit<MemoryRecord, "id" | "status" | "supersedesId" | "createdAt" | "updatedAt">): MemoryRecord {
+    const accountId = input.scope === "account" ? input.accountId ?? "" : "";
+    if (input.scope === "account" && !accountId) throw new Error("Account-scoped memory requires accountId");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const previous = this.db.prepare(`SELECT id,statement FROM assistant_memories
+        WHERE kind=? AND memory_key=? AND scope=? AND account_id=? AND status='active'`)
+        .get(input.kind, input.key, input.scope, accountId) as { id: number; statement: string } | undefined;
+      if (previous?.statement === input.statement) {
+        this.db.exec("COMMIT");
+        return this.getMemory(previous.id)!;
+      }
+      if (previous) this.db.prepare("UPDATE assistant_memories SET status='superseded',updated_at=CURRENT_TIMESTAMP WHERE id=?").run(previous.id);
+      const result = this.db.prepare(`INSERT INTO assistant_memories
+        (kind,memory_key,statement,scope,account_id,confidence,source,source_mail_id,source_plan_id,supersedes_id)
+        VALUES(?,?,?,?,?,?,?,?,?,?)`).run(input.kind, input.key, input.statement, input.scope, accountId, input.confidence,
+          input.source, input.sourceMailId ?? null, input.sourcePlanId ?? null, previous?.id ?? null);
+      this.db.exec("COMMIT");
+      return this.getMemory(Number(result.lastInsertRowid))!;
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  getMemory(id: number): MemoryRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM assistant_memories WHERE id=?").get(id) as any;
+    return row ? this.rowToMemory(row) : undefined;
+  }
+
+  listMemories(includeInactive = false): MemoryRecord[] {
+    return (this.db.prepare(`SELECT * FROM assistant_memories ${includeInactive ? "" : "WHERE status='active'"} ORDER BY id DESC`).all() as unknown as any[])
+      .map((row) => this.rowToMemory(row));
+  }
+
+  setMemoryEnabled(id: number, enabled: boolean): MemoryRecord | undefined {
+    const target = this.getMemory(id);
+    if (!target || target.status === "superseded") return target;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (enabled) {
+        this.db.prepare(`UPDATE assistant_memories SET status='superseded',updated_at=CURRENT_TIMESTAMP
+          WHERE kind=? AND memory_key=? AND scope=? AND account_id=? AND status='active' AND id!=?`)
+          .run(target.kind, target.key, target.scope, target.accountId ?? "", id);
+      }
+      this.db.prepare("UPDATE assistant_memories SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(enabled ? "active" : "disabled", id);
+      this.db.exec("COMMIT");
+      return this.getMemory(id);
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  private rowToMemory(row: any): MemoryRecord {
+    return { id: row.id, kind: row.kind, key: row.memory_key, statement: row.statement, scope: row.scope,
+      confidence: row.confidence, source: row.source, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
+      ...(row.account_id ? { accountId: row.account_id } : {}), ...(row.source_mail_id ? { sourceMailId: row.source_mail_id } : {}),
+      ...(row.source_plan_id ? { sourcePlanId: row.source_plan_id } : {}), ...(row.supersedes_id ? { supersedesId: row.supersedes_id } : {}) };
   }
 
   setState(id: number, state: StoredMail["state"], error?: string): void {

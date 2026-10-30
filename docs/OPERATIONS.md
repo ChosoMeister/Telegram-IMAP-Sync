@@ -39,6 +39,8 @@ For a new additional account, validate its folders and SMTP in a one-off dry-run
 
 `http://127.0.0.1:18080/` returns `200` only while IMAP is usable and `503` while disconnected. JSON includes each account's transport state and notification mode (`idle`, `idle-pending`, `polling-fallback`, or `unavailable`), last successful reconciliation, last Telegram poll, Inbox/state counts, durable job counts, learned-rule totals, AI provider results, SMTP and Telegram activity, backup success/error, mode, and current time. Inside Telegram, `/status` and `/accounts` report the operational subset. `idle-pending` is the normal short connected period before ImapFlow automatically enters IDLE; `polling-fallback` means the server did not advertise IDLE.
 
+`/memory` lists confirmed and inferred assistant memories with their account/global scope and allows active non-superseded entries to be disabled or restored. Confirmed memories originate from explicit user wording; inferred model observations are stored for review but do not affect analysis until confirmed. A newer correction with the same kind/key/scope supersedes the old value.
+
 Useful commands:
 
 ```sh
