@@ -17,8 +17,8 @@ Incrementally add durable Persian conversation, memory, tasks, reminders, and op
   - [x] Add automation permission/exception evaluation and natural-language decision explanations.
 - [x] Add independent mail tasks and durable timezone-aware reminders with restart/downtime recovery.
 - [x] Add observation-only automation and code-gated execution for new mail; keep production activation separately approval-gated.
-- [ ] Run migration/regression/real-model tests, update all documentation, and prepare backup, deployment, and rollback instructions.
+- [x] Run migration/regression/real-model tests, update all documentation, and prepare backup, deployment, and rollback instructions.
 
 ## Done when
 
-- [ ] All 21 acceptance scenarios in the mission have repeatable evidence and production activation remains separately gated.
+- [x] All 21 acceptance scenarios in the mission have repeatable evidence and production activation remains separately gated.

@@ -17,6 +17,7 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "docs:check": "node scripts/check-docs.mjs",
+    "verify:ai": "node dist/verify-ai.js",
     "check": "npm run lint && npm run test && npm run build && npm run docs:check"
   },
   "dependencies": {

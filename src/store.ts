@@ -484,6 +484,19 @@ export class Store {
       .all() as unknown as MailRow[]).map((r) => this.rowToMail(r));
   }
 
+  searchMails(query: string, limit = 5): StoredMail[] {
+    const tokens = query.trim().toLocaleLowerCase("fa-IR").split(/\s+/u).filter((token) => token.length >= 2).slice(0, 8);
+    if (!tokens.length) return [];
+    const rows = this.db.prepare(`SELECT * FROM mails
+      ORDER BY CASE WHEN state IN ('pending','failed','processing') THEN 0 ELSE 1 END,
+      json_extract(payload_json,'$.receivedAt') DESC,id DESC LIMIT 500`).all() as unknown as MailRow[];
+    return rows.map((row) => this.rowToMail(row)).filter((mail) => {
+      const value = [mail.subject, mail.text, ...mail.from.flatMap((item) => [item.name ?? "", item.address]),
+        ...mail.to.flatMap((item) => [item.name ?? "", item.address]), mail.analysis?.summaryFa ?? ""].join("\n").toLocaleLowerCase("fa-IR");
+      return tokens.every((token) => value.includes(token));
+    }).slice(0, Math.max(1, Math.min(limit, 20)));
+  }
+
   listPendingCards(): StoredMail[] {
     const representatives = new Map<string, StoredMail>();
     for (const mail of this.listPending()) {

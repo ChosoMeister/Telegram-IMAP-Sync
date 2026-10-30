@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Store } from "../src/store.js";
 import { MemoryService } from "../src/memory.js";
 import { incoming } from "./helpers.js";
@@ -40,5 +43,19 @@ describe("structured memory", () => {
     expect(store.getMemory(current.id)?.status).toBe("superseded");
     expect(store.listMemories()).toHaveLength(1);
     store.close();
+  });
+
+  it("keeps a confirmed working preference after restart and a new conversation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "mailbot-memory-restart-"));
+    const path = join(directory, "mailbot.sqlite");
+    const before = new Store(path);
+    new MemoryService(before).remember({ kind: "preference", key: "working_morning", statement: "اول صبح کاری ساعت ۱۰ است",
+      scope: "global", confidence: "confirmed", source: "user" });
+    before.close();
+    const after = new Store(path);
+    expect(new MemoryService(after).trustedGuidance({ ...incoming, id: 1, state: "pending", telegramMessageIds: [] }))
+      .toContain("اول صبح کاری ساعت ۱۰ است");
+    after.close();
+    await rm(directory, { recursive: true, force: true });
   });
 });

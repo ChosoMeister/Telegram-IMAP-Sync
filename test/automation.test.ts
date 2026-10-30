@@ -52,4 +52,32 @@ describe("automation observation and execution gates", () => {
       exceptions: [], source: "user" })).toThrow("accountId");
     store.close();
   });
+
+  it("stops new automatic actions when the matching policy is paused", async () => {
+    const store = new Store(":memory:");
+    const { id } = store.upsertMail({ ...incoming, subject: "خبرنامه هفتگی" });
+    store.setAnalysis(id, analysis);
+    const policy = store.saveAutomationPolicy({ name: "خبرنامه‌ها", category: "newsletter", action: "archive", scope: "global", exceptions: [], source: "user" });
+    store.setAutomationPolicyStatus(policy.id, "paused");
+    const execute = vi.fn();
+    expect(await new AutomationService(store, "execute", execute).evaluate(store.getMail(id)!, true)).toBeUndefined();
+    expect(execute).not.toHaveBeenCalled();
+    store.close();
+  });
+
+  it("archives an authorized receipt but not a new payment request assigned to the user", async () => {
+    const store = new Store(":memory:");
+    const receipt = store.upsertMail({ ...incoming, subject: "رسید پرداخت", text: "پرداخت شما ثبت شد و اقدامی لازم نیست" });
+    const request = store.upsertMail({ ...incoming, uid: 9, messageId: "<payment-request@example.com>", subject: "درخواست پرداخت",
+      text: "لطفاً پرداخت جدید را تأیید کنید" });
+    store.setAnalysis(receipt.id, analysis);
+    store.setAnalysis(request.id, { ...analysis, importance: "high", score: 80, actionOwner: "self" });
+    store.saveAutomationPolicy({ name: "اطلاع‌رسانی‌های بدون اقدام", category: "informational", action: "archive", scope: "global", exceptions: [], source: "user" });
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const service = new AutomationService(store, "execute", execute);
+    expect((await service.evaluate(store.getMail(receipt.id)!, true))?.outcome).toBe("executed");
+    expect(await service.evaluate(store.getMail(request.id)!, true)).toBeUndefined();
+    expect(execute).toHaveBeenCalledOnce();
+    store.close();
+  });
 });

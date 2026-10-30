@@ -107,6 +107,21 @@ docker compose logs --tail 100
 
 For rollback, check out a known commit/tag, rebuild, and start without deleting the named volume. Never use `docker compose down --volumes` during a normal upgrade or rollback.
 
+### Conversational assistant staged release
+
+Before this release, record the deployed commit/image and run the WAL-safe `/backup` flow. Download and open one produced backup with the current binary; do not copy the live SQLite file. Keep `AUTOMATION_MODE=off` for the first deployment. Migrations 6–10 are additive and preserve existing mail/card IDs; no Inbox re-import or card republish is required.
+
+Run the synthetic real-model verifier before starting the bot image:
+
+```sh
+docker compose build mailbot
+docker compose run --rm --no-deps --entrypoint node mailbot dist/verify-ai.js
+```
+
+The one-off verifier does not initialize Telegram polling, IMAP, SMTP, or the database. After deployment, verify health, `/status`, `/search`, `/memory`, and `/tasks` without mail writes. Only after separate approval should `AUTOMATION_MODE=observe` be enabled. Observe controlled new mail before a later, separately approved switch to `execute`.
+
+For code rollback, set `AUTOMATION_MODE=off`, check out the recorded previous commit/image, rebuild, and recreate only `mailbot`; preserve the named volume. The old binary ignores additive tables, while tasks, memories, and policy data remain available for a later forward upgrade. Restoring an older database would discard state created after deployment and is therefore an emergency decision, not the default rollback. No code/database rollback can reverse an email already moved or an SMTP message already accepted.
+
 ## Troubleshooting
 
 - **IMAP `ECONNREFUSED`:** test DNS and TCP reachability from inside the container. An internal hostname must resolve to the internal address there; Docker cannot bypass firewall/routing policy.
@@ -141,6 +156,6 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Telegram cleanup job is failed:** the source mail action is already complete and must not be repeated. Telegram message IDs remain durable; restore Bot API access and let the cleanup job retry or inspect `/failed`.
 - **Telegram backup is missing:** confirm `BACKUP_TELEGRAM_CHAT_ID`, bot posting rights, compressed size, and `/backup`. The local online backup remains authoritative.
 - **A learned analysis rule is wrong:** use `/rules` and pause the exact numbered rule. Rules are account-scoped, reversible, and cannot move or send mail. Reanalyze an affected email after disabling a rule if a fresh AI result is required.
-- **Operational status is needed:** use `/status`, `/accounts`, `/failed`, `/backup`, `/rules`, `/diagnose`, or `/sync`. Responses have a Close button and the original command is removed when the bot has deletion permission.
+- **Operational status is needed:** use `/status`, `/accounts`, `/failed`, `/backup`, `/rules`, `/memory`, `/tasks`, `/automations`, `/search`, `/diagnose`, or `/sync`. Responses have a Close button and the original command is removed when the bot has deletion permission.
 - **AI returns the old greeting/closing:** version 0.3.1 normalizes generated output after the provider response. Confirm the running image/version and rebuild/redeploy; manually edited text is intentionally preserved verbatim.
 - **Restart loop:** inspect the first fatal log entry, validate `.env` with `docker compose config`, and test required destinations from inside the container.

@@ -16,5 +16,10 @@
       "organization": "Second Company",
       "jobTitle": "Second job title"
     }
-  ]
+  ],
+  "workingSchedule": {
+    "workingDays": ["saturday", "sunday", "monday", "tuesday", "wednesday"],
+    "startTime": "10:00",
+    "endTime": "18:00"
+  }
 }

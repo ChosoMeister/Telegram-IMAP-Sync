@@ -13,6 +13,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Structured global/account memory with explicit source and confidence, superseding corrections, `/memory` controls, and confirmed-only analysis guidance
 - Independent importance and action ownership: a critical FYI stays critical and keeps its risk even when no direct user action is required
 - Independent open/waiting mail tasks with timezone-aware durable reminders, restart recovery, delivery tracking, deduplication, and `/tasks` controls
+- Free-text Telegram fallback plus bounded local `/search`/«جستجو …» over retained mail without changing mailbox state
 - Explicit opt-in informational/newsletter/marketing automation with global/account scope, keyword exceptions, observation-only evidence, per-mail Persian explanations, and `/automations` pause/resume controls
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
@@ -62,6 +63,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - [Multi-account / All Inbox design](docs/MULTI_ACCOUNT_DESIGN.md) — account-scoped IMAP/SMTP architecture and rollout
 - [Gmail / Google Workspace setup](docs/GMAIL.md) — App Password, folders, SMTP modes, discovery, and commissioning
 - [Release and documentation checklist](docs/MAINTENANCE.md)
+- [Conversational acceptance evidence](docs/ACCEPTANCE.md) — all 21 mission scenarios and the isolated real-model verifier
 - [راهنمای فارسی](README.fa.md)
 
 ## Local preparation

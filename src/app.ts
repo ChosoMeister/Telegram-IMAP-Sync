@@ -90,6 +90,7 @@ export class MailBotApp {
       { command: "memory", description: "حافظه تأییدشده دستیار" },
       { command: "automations", description: "قواعد خودکارسازی و حالت اجرا" },
       { command: "tasks", description: "کارها و یادآوری‌های باز" },
+      { command: "search", description: "جست‌وجوی ایمیل‌های نگه‌داری‌شده" },
       { command: "diagnose", description: "گزارش کامل سلامت" },
       { command: "chatid", description: "نمایش شناسه چت برای Backup" }
     ]).catch((error) => this.logger.warn("Could not register Telegram commands", { error: describeError(error) }));
@@ -403,7 +404,7 @@ export class MailBotApp {
   }
 
   private async handleCallback(callbackId: string, data: string): Promise<void> {
-    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|retryai|feedback|fbimportance|fbnotmine|fbinformational|fbi(?:critical|high|normal|low)|fbonce|fbsender|fbsubject|fbdomain|fbconfirm|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|voice|voiceconfirm|voiceedit|voiceraw|voiceclean|edit|formal|short|friendly|send|cancel)$/.exec(data);
+    const match = /^m:(\d+):(summary|body(?::\d+)?|allbody(?::\d+)?|files|hidden|thread|ask|askmail|askfiles|askthread|retryai|feedback|fbimportance|fbnotmine|fbinformational|fbi(?:critical|high|normal|low)|fbonce|fbsender|fbsubject|fbdomain|fbconfirm|done|reply|replyall|forward|calaccept(?:confirm)?|caltentative(?:confirm)?|caldecline(?:confirm)?|instruct|voice|voiceconfirm|voiceedit|voiceraw|voiceclean|edit|formal|short|friendly|send(?::[a-f0-9]{12})?|cancel)$/.exec(data);
     if (!match) return;
     const requestedMailId = Number(match[1]);
     const requestedMail = this.store.getMail(requestedMailId);
@@ -491,8 +492,16 @@ export class MailBotApp {
       return;
     }
     if (action === "formal" || action === "short" || action === "friendly") return this.changeTone(mail, action);
-    if (action === "send") {
+    if (action?.startsWith("send")) {
       const current = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
+      const suppliedToken = action.split(":")[1];
+      if (!current?.draft) throw new Error("Reply or Forward draft is missing");
+      if (!suppliedToken || suppliedToken !== this.draftApprovalToken(mail, current.draft, current.replyAll, current.metadata)) {
+        const warning = "⚠️ تأیید قبلی منقضی شده است؛ نسخه فعلی را دوباره بررسی و دکمه جدید را بزنید.";
+        if (current.metadata?.kind === "forward") await this.showForwardDraft(mail, current.draft, this.forwardRecipients(current.metadata), this.voiceTranscript(current.metadata), warning);
+        else await this.showDraft(mail, current.draft, current.replyAll, this.voiceTranscript(current.metadata), warning);
+        return;
+      }
       return current?.metadata?.kind === "forward" ? this.sendForward(mail) : this.sendReply(mail);
     }
     this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
@@ -916,6 +925,11 @@ export class MailBotApp {
       await this.sendCommandResult(message, rendered.text, rendered.buttons);
       return;
     }
+    if (command === "/search") {
+      const query = message.text?.trim().replace(/^\/search(?:@[A-Za-z0-9_]+)?\s*/iu, "") ?? "";
+      await this.sendCommandResult(message, this.renderSearchResults(query));
+      return;
+    }
     if (command === "/diagnose") {
       const status = this.status();
       await this.sendCommandResult(message, [
@@ -945,6 +959,8 @@ export class MailBotApp {
       const active = this.store.getConversation(this.config.TELEGRAM_USER_ID);
       if (active && ["instruction", "voice_instruction", "voice_transcript_edit", "manual_edit", "forward_recipients", "ai_question", "plan_clarification"].includes(active.mode)) {
         await this.telegram.sendMessage("برای جلوگیری از انتخاب ایمیل اشتباه، متن یا Voice را فقط با Reply مستقیم به پیام درخواست ربات ارسال کنید.", undefined, true);
+      } else if (message.text?.trim()) {
+        await this.handleUnboundText(message);
       }
       return;
     }
@@ -1281,6 +1297,28 @@ export class MailBotApp {
     };
   }
 
+  private async handleUnboundText(message: TelegramMessage): Promise<void> {
+    const text = message.text!.trim();
+    const search = /^(?:جستجو|جست‌وجو|پیدا کن)\s+(.+)$/u.exec(text);
+    let result: string;
+    if (search) result = this.renderSearchResults(search[1]!);
+    else if (/(?:کارها|وظایف|پیگیری).*(?:باز|مانده|روی زمین)|چه کارهایی/u.test(text)) result = this.renderTasksCommand().text;
+    else if (/(?:چی|چه).*(?:یاد گرفتی|می‌دانی)|حافظه/u.test(text)) result = this.renderMemoryCommand().text;
+    else if (/خودکارسازی|قواعد خودکار/u.test(text)) result = this.renderAutomationsCommand().text;
+    else result = "پیام شما دریافت شد. برای اقدام یا سؤال درباره یک ایمیل، روی همان کارت Reply مستقیم بزنید. برای جست‌وجو بنویسید «جستجو عبارت»، و برای فهرست‌ها از /tasks، /memory یا /automations استفاده کنید.";
+    await this.telegram.sendMessageTo(message.chat.id, result, [[{ text: "✖️ بستن", callback_data: "sys:close" }]], true);
+  }
+
+  private renderSearchResults(query: string): string {
+    const value = query.trim();
+    if (value.length < 2) return "عبارت جست‌وجو را بعد از /search یا واژه «جستجو» بنویسید.";
+    const results = this.store.searchMails(value, 5);
+    if (!results.length) return `برای «${esc(value.slice(0, 100))}» نتیجه‌ای در داده‌های نگه‌داری‌شده پیدا نشد.`;
+    return [`<b>نتیجه جست‌وجو: ${esc(value.slice(0, 100))}</b>`, ...results.map((mail) =>
+      `${mail.state === "pending" || mail.state === "failed" || mail.state === "processing" ? "📥" : "📁"} <b>#${mail.id}</b> [${esc(mail.accountLabel ?? mail.accountId ?? this.primaryAccountId)}]\n${esc(mail.subject)}\nاز: ${esc(mail.from[0]?.name || mail.from[0]?.address || "نامشخص")}`
+    )].join("\n\n");
+  }
+
   private automationActivationKey(): string { return `automation:${this.effectiveAutomationMode()}:activated-at`; }
   private effectiveAutomationMode(): "off" | "observe" | "execute" {
     return this.config.AUTOMATION_MODE === "execute" && this.config.APP_MODE !== "live" ? "observe" : this.config.AUTOMATION_MODE;
@@ -1403,9 +1441,11 @@ export class MailBotApp {
     }, 3_000);
   }
 
-  private async showForwardDraft(mail: StoredMail, draft: string, recipients: string[], voiceTranscript?: string): Promise<void> {
-    await this.editPrimary(mail, `<b>پیش‌نویس متن همراه فوروارد</b>\n<b>گیرندگان:</b> ${esc(recipients.join(", "))}\n<b>پیوست‌ها:</b> ${mail.attachments.filter((item) => item.isRealAttachment).length}${this.renderVoiceTranscript(voiceTranscript)}\n\n<b>متن نهایی:</b>\n${esc(draft)}`, [[
-      { text: "✅ ارسال نهایی", callback_data: `m:${mail.id}:send`, style: "success" },
+  private async showForwardDraft(mail: StoredMail, draft: string, recipients: string[], voiceTranscript?: string, notice?: string): Promise<void> {
+    const conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
+    const approvalToken = this.draftApprovalToken(mail, draft, false, conversation?.metadata);
+    await this.editPrimary(mail, `${notice ? `${esc(notice)}\n\n` : ""}<b>پیش‌نویس متن همراه فوروارد</b>\n<b>گیرندگان:</b> ${esc(recipients.join(", "))}\n<b>پیوست‌ها:</b> ${mail.attachments.filter((item) => item.isRealAttachment).length}${this.renderVoiceTranscript(voiceTranscript)}\n\n<b>متن نهایی:</b>\n${esc(draft)}`, [[
+      { text: "✅ ارسال نهایی", callback_data: `m:${mail.id}:send:${approvalToken}`, style: "success" },
       ...(this.config.VOICE_REPLY_ENABLED ? [{ text: "🎙 دستور صوتی", callback_data: `m:${mail.id}:voice` }] : []),
       { text: "💬 دستور متنی", callback_data: `m:${mail.id}:instruct`, style: "primary" }
     ], [
@@ -1439,7 +1479,7 @@ export class MailBotApp {
     return `\n\n<b>متن استخراج‌شده از Voice:</b>\n${esc(visible)}`;
   }
 
-  private async showDraft(mail: StoredMail, draft: string, replyAll: boolean, voiceTranscript?: string): Promise<void> {
+  private async showDraft(mail: StoredMail, draft: string, replyAll: boolean, voiceTranscript?: string, notice?: string): Promise<void> {
     const primary = mail.replyTo.length ? mail.replyTo : mail.from;
     const excluded = new Set([...this.ownAddresses().map((address) => address.toLowerCase()), ...primary.map((a) => a.address.toLowerCase())]);
     const seen = new Set<string>();
@@ -1449,8 +1489,10 @@ export class MailBotApp {
       seen.add(key); return true;
     }) : [];
     const recipients = [...primary, ...copies].map((a) => a.address).join(", ");
-    await this.editPrimary(mail, `<b>پیش‌نویس پاسخ AI</b>\n<b>گیرندگان:</b> ${esc(recipients)}${this.renderVoiceTranscript(voiceTranscript)}\n\n<b>متن نهایی:</b>\n${esc(draft)}`, [[
-      { text: "✅ ارسال نهایی", callback_data: `m:${mail.id}:send`, style: "success" },
+    const conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
+    const approvalToken = this.draftApprovalToken(mail, draft, replyAll, conversation?.metadata);
+    await this.editPrimary(mail, `${notice ? `${esc(notice)}\n\n` : ""}<b>پیش‌نویس پاسخ AI</b>\n<b>گیرندگان:</b> ${esc(recipients)}${this.renderVoiceTranscript(voiceTranscript)}\n\n<b>متن نهایی:</b>\n${esc(draft)}`, [[
+      { text: "✅ ارسال نهایی", callback_data: `m:${mail.id}:send:${approvalToken}`, style: "success" },
       ...(this.config.VOICE_REPLY_ENABLED ? [{ text: "🎙 دستور صوتی", callback_data: `m:${mail.id}:voice` }] : []),
       { text: "💬 دستور متنی", callback_data: `m:${mail.id}:instruct`, style: "primary" }
     ], [
@@ -1461,6 +1503,12 @@ export class MailBotApp {
       { text: "کوتاه", callback_data: `m:${mail.id}:short` },
       { text: "دوستانه", callback_data: `m:${mail.id}:friendly` }
     ]]);
+  }
+
+  private draftApprovalToken(mail: StoredMail, draft: string, replyAll: boolean, metadata?: Record<string, unknown>): string {
+    const recipients = metadata?.kind === "forward" ? this.forwardRecipients(metadata) : [];
+    return createHash("sha256").update(JSON.stringify({ mailId: mail.id, accountId: mail.accountId ?? this.primaryAccountId,
+      draft, replyAll, kind: metadata?.kind ?? "reply", recipients })).digest("hex").slice(0, 12);
   }
 
   private async sendReply(mail: StoredMail): Promise<void> {
@@ -1506,7 +1554,8 @@ export class MailBotApp {
       this.logger.info("Reply sent, saved to Sent, and mail archived; Telegram cleanup queued", { mailId: mail.id, replyAll: conversation.replyAll });
     } catch (error) {
       const retryStep = sentCopySaved ? "آرشیو" : "ذخیره در Sent";
-      await this.editPrimary(mail, `${replySent ? `⚠️ پاسخ ارسال شد، اما مرحله ${retryStep} ناموفق بود. پاسخ دوباره ارسال نمی‌شود.` : "❌ پاسخ ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, replySent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send`, style: "primary" }]] : [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
+      const token = this.draftApprovalToken(mail, conversation.draft, conversation.replyAll, conversation.metadata);
+      await this.editPrimary(mail, `${replySent ? `⚠️ پاسخ ارسال شد، اما مرحله ${retryStep} ناموفق بود. پاسخ دوباره ارسال نمی‌شود.` : "❌ پاسخ ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, replySent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send:${token}`, style: "primary" }]] : [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
     }
     });
   }
@@ -1555,7 +1604,8 @@ export class MailBotApp {
       this.logger.info("Mail forwarded with attachments, saved to Sent, and archived; Telegram cleanup queued", { mailId: mail.id, recipientCount: recipients.length });
     } catch (error) {
       const retryStep = sentCopySaved ? "آرشیو" : "ذخیره در Sent";
-      await this.editPrimary(mail, `${forwardSent ? `⚠️ فوروارد ارسال شد، اما مرحله ${retryStep} ناموفق بود. ایمیل دوباره ارسال نمی‌شود.` : "❌ فوروارد ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, forwardSent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send`, style: "primary" }]] : [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
+      const token = this.draftApprovalToken(mail, conversation.draft, false, conversation.metadata);
+      await this.editPrimary(mail, `${forwardSent ? `⚠️ فوروارد ارسال شد، اما مرحله ${retryStep} ناموفق بود. ایمیل دوباره ارسال نمی‌شود.` : "❌ فوروارد ارسال نشد؛ ایمیل دست‌نخورده باقی ماند."}\n${esc(error instanceof Error ? error.message : String(error))}`, forwardSent ? [[{ text: `🔄 تلاش مجدد برای ${retryStep}`, callback_data: `m:${mail.id}:send:${token}`, style: "primary" }]] : [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
     }
     });
   }

@@ -6,11 +6,17 @@ const identitySchema = z.object({
   organization: z.string().min(1).optional(),
   jobTitle: z.string().min(1).optional()
 });
+const workingScheduleSchema = z.object({
+  workingDays: z.array(z.enum(["saturday", "sunday", "monday", "tuesday", "wednesday", "thursday", "friday"])).min(1),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+});
 const profileSchema = z.object({
   displayNameFa: z.string().min(1),
   displayNameEn: z.string().min(1).optional(),
   nameAliases: z.array(z.string().min(1)).default([]),
-  identities: z.array(identitySchema).min(1)
+  identities: z.array(identitySchema).min(1),
+  workingSchedule: workingScheduleSchema.optional()
 });
 
 export type UserProfile = z.infer<typeof profileSchema>;

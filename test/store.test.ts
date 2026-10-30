@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Store } from "../src/store.js";
 import { incoming } from "./helpers.js";
 
@@ -27,6 +30,12 @@ describe("Store", () => {
     store.upsertMail({ ...incoming, uid: 8 });
     store.upsertMail({ ...incoming, uid: 9, uidValidity: "different" });
     expect([...store.listKnownUids("primary", incoming.mailbox, incoming.uidValidity)].sort()).toEqual([7, 8]);
+  });
+  it("searches retained mail locally without changing its state", () => {
+    const first = store.upsertMail({ ...incoming, subject: "فاکتور سرور", text: "صورتحساب دیتاسنتر" });
+    store.upsertMail({ ...incoming, uid: 8, messageId: "<other@example.com>", subject: "جلسه تیم" });
+    expect(store.searchMails("فاکتور سرور", 5)).toEqual([expect.objectContaining({ id: first.id, subject: "فاکتور سرور", state: "pending" })]);
+    expect(store.getMail(first.id)?.state).toBe("pending");
   });
   it("persists analysis, Telegram IDs and conversation state", () => {
     const { id } = store.upsertMail(incoming);
@@ -153,5 +162,28 @@ describe("Store", () => {
     expect(store.retryAnalysis(id)).toBe(true);
     expect(store.getMail(id)?.analysis).toBeUndefined();
     expect(store.leaseJob()).toMatchObject({ id: job.id, attempts: 1 });
+  });
+  it("migrates a production-like pre-conversation database without losing mail card identity", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "mailbot-migration-"));
+    const path = join(directory, "mailbot.sqlite");
+    const legacy = new Store(path);
+    const { id } = legacy.upsertMail(incoming);
+    legacy.setTelegramMessages(id, [700]);
+    const db = (legacy as any).db;
+    db.exec(`
+      DROP TABLE automation_decisions; DROP TABLE automation_policies; DROP TABLE mail_tasks;
+      DROP TABLE assistant_memories; DROP TABLE conversation_tool_results; DROP TABLE conversation_plans;
+      DROP TABLE telegram_commands; DROP TABLE telegram_message_refs;
+      DELETE FROM schema_migrations WHERE version>=6;
+    `);
+    legacy.close();
+
+    const migrated = new Store(path);
+    expect(migrated.getMail(id)).toMatchObject({ id, telegramMessageIds: [700], state: "pending" });
+    expect(migrated.backfillTelegramCardReferences(42)).toBe(1);
+    expect(migrated.resolveTelegramMessage(42, 700)).toMatchObject({ mailId: id, role: "card" });
+    expect(migrated.listAutomationPolicies()).toEqual([]);
+    migrated.close();
+    await rm(directory, { recursive: true, force: true });
   });
 });
