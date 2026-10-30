@@ -47,7 +47,7 @@ export class BackupService {
   }
 
   private async sendToTelegram(path: string, filename: string): Promise<void> {
-    const compressedPath = `/tmp/${filename}.gz`;
+    const compressedPath = join(this.config.BACKUP_DIR, `.${filename}.telegram.gz`);
     try {
       await pipeline(createReadStream(path), createGzip({ level: 9 }), createWriteStream(compressedPath, { flags: "wx" }));
       const compressedSize = (await stat(compressedPath)).size;

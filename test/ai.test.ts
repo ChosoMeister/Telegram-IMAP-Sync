@@ -5,8 +5,8 @@ import { config, incoming } from "./helpers.js";
 import { normalizeSelfReference, type UserProfile } from "../src/user-profile.js";
 
 const profile: UserProfile = {
-  displayNameFa: "مصطفی طائفی", displayNameEn: "Mustafa Tayefi", nameAliases: ["مصطفی طائفی", "طائفی", "Mustafa Tayefi"],
-  identities: [{ email: "tayefi.m@example.com", organization: "Example" }]
+  displayNameFa: "کاربر نمونه", displayNameEn: "Example User", nameAliases: ["کاربر نمونه", "Example User"],
+  identities: [{ email: "user@example.com", organization: "Example" }]
 };
 
 describe("AI analysis normalization", () => {
@@ -19,12 +19,12 @@ describe("AI analysis normalization", () => {
     expect(normalizeReplyHonorific("جناب آقای صبا ساده،\nبا درود و مهر", "خانم")).toBe("سرکار خانم صبا ساده،\nبا درود و مهر");
   });
   it("turns third-person references to the profile owner into direct instructions", () => {
-    expect(normalizeSelfReference("آقای طائفی موارد را بررسی کند.", profile)).toEqual({ text: "شما موارد را بررسی کنید.", refersToSelf: true });
+    expect(normalizeSelfReference("کاربر نمونه موارد را بررسی کند.", profile)).toEqual({ text: "شما موارد را بررسی کنید.", refersToSelf: true });
   });
   it("accepts a null optional deadline from an OpenAI-compatible provider", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: JSON.stringify({
-        importance: "normal", score: 50, summaryFa: "خلاصه", suggestedAction: "آقای طائفی موارد را بررسی کند", actionOwner: "self", deadline: null, reason: "عادی"
+        importance: "normal", score: 50, summaryFa: "خلاصه", suggestedAction: "کاربر نمونه موارد را بررسی کند", actionOwner: "self", deadline: null, reason: "عادی"
       }) } }]
     }), { status: 200, headers: { "content-type": "application/json" } }));
     const service = new AiService({
@@ -37,6 +37,23 @@ describe("AI analysis normalization", () => {
     expect(analysis).toMatchObject({ score: 50, provider: "proxy:test" });
     expect(analysis).toMatchObject({ actionOwner: "self", suggestedAction: "شما موارد را بررسی کنید" });
     expect(analysis).not.toHaveProperty("deadline");
+    fetchMock.mockRestore();
+  });
+  it("drops malformed or oversized action links without discarding an otherwise valid analysis", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        importance: "high", score: 80, summaryFa: "خلاصه", suggestedAction: "بررسی کنید", reason: "درخواست", actionOwner: "self",
+        actionLinks: [`https://example.test/${"x".repeat(400)}`, "not-a-url", "https://example.test/valid"]
+      }) } }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const service = new AiService({
+      ...config, AI_ENABLED: true, AI_PROVIDER_ORDER: "proxy", aiProviderOrder: ["proxy"],
+      AI_PROXY_BASE_URL: "https://ai.example.test/v1", AI_PROXY_API_KEY: "test", AI_PROXY_MODEL: "test"
+    }, new Logger("error"));
+    const analysis = await service.analyze({
+      ...incoming, text: "Open https://example.test/valid", id: 1, state: "pending", telegramMessageIds: []
+    });
+    expect(analysis).toMatchObject({ provider: "proxy:test", actionLinks: ["https://example.test/valid"] });
     fetchMock.mockRestore();
   });
   it("normalizes a model reply even when the provider ignores the Persian style policy", async () => {

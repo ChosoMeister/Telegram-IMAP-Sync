@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Prevent malformed or oversized AI action links from discarding an otherwise valid email analysis.
+- Keep terminal AI jobs stopped until the user explicitly requests a retry.
+- Stage compressed Telegram backups on the persistent backup volume instead of the bounded container tmpfs.
+- Add per-account IMAP Auto-IDLE and reconnect observability with dedicated regression coverage.
+- Upgrade Nodemailer and Vitest to patched releases and remove personal data from public test fixtures.
+
+## Unreleased
+
 ## 0.13.1 - 2026-08-30
 
 - Make backup scheduling success-age based: restarts no longer create extra local/Telegram backups before the configured 24-hour interval, while failed due backups retry on the next hourly check.

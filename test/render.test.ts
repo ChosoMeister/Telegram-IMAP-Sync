@@ -60,7 +60,7 @@ describe("mail card buttons", () => {
   it("renders a structured calendar card without generic AI or attachment wording", () => {
     const mail: StoredMail = { ...stored(1), calendar: {
       method: "REQUEST", uid: "event-1", summary: "جلسه پروژه", organizer: { name: "Organizer", address: "organizer@example.com" },
-      attendees: [{ name: "Mustafa", address: "me@example.com" }, { address: "unnamed@example.com" }], start: { raw: "20260820T103000Z", iso: "2026-08-20T10:30:00.000Z", timeZone: "UTC" }
+      attendees: [{ name: "Example User", address: "me@example.com" }, { address: "unnamed@example.com" }], start: { raw: "20260820T103000Z", iso: "2026-08-20T10:30:00.000Z", timeZone: "UTC" }
     }, attachments: [{ partId: "0", filename: "attachment-1", contentType: "text/calendar", size: 100, contentDisposition: "attachment", classification: "calendar", isRealAttachment: false }],
     analysis: { importance: "low", score: 30, summaryFa: "خلاصه اشتباه", suggestedAction: "اقدام اشتباه", reason: "کمبود متن", provider: "test" }
     };
@@ -68,7 +68,7 @@ describe("mail card buttons", () => {
     expect(rendered).toContain("دعوت تقویم");
     expect(rendered).toContain("جلسه پروژه");
     expect(rendered).toContain("شرکت‌کنندگان (2 نفر)");
-    expect(rendered).toContain("• Mustafa");
+    expect(rendered).toContain("• Example User");
     expect(rendered).not.toContain("me@example.com");
     expect(rendered).toContain("• unnamed@example.com");
     expect(rendered).not.toContain("خلاصه اشتباه");

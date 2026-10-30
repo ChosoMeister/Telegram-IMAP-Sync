@@ -94,7 +94,7 @@ describe("Store", () => {
     store.completeJob(job!.id);
     expect(store.jobCounts()).toMatchObject({ complete: 1 });
   });
-  it("revives terminal jobs only after their retry delay", () => {
+  it("never revives terminal jobs during background reconciliation", () => {
     const { id } = store.upsertMail(incoming);
     store.enqueueJob("analyze", id);
     const job = store.leaseJob()!;
@@ -103,7 +103,7 @@ describe("Store", () => {
     expect(store.leaseJob()).toBeUndefined();
     store.failJob(job.id, "provider unavailable", 0, true);
     store.enqueueJob("analyze", id);
-    expect(store.leaseJob()).toMatchObject({ id: job.id, attempts: 2 });
+    expect(store.leaseJob()).toBeUndefined();
   });
   it("immediately resets a failed analysis when the user requests retry", () => {
     const { id } = store.upsertMail(incoming);

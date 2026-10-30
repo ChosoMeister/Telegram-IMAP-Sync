@@ -39,7 +39,7 @@ describe("mail content", () => {
       "BEGIN:VCALENDAR", "METHOD:REQUEST", "BEGIN:VEVENT", "UID:event-1@example.com",
       "SUMMARY:ذخیره سازی مدارک ویدیویی بیمار", "DTSTART;TZID=\"(UTC+03:30) Tehran\":20260820T103000",
       "DTEND;TZID=\"(UTC+03:30) Tehran\":20260820T110000", "LOCATION:جلسه آنلاین",
-      "ORGANIZER;CN=Marjan Hosseini:mailto:marjan@example.com", "ATTENDEE;CN=Mustafa:mailto:mustafa@example.com",
+      "ORGANIZER;CN=Example Organizer:mailto:organizer@example.com", "ATTENDEE;CN=Example User:mailto:user@example.com",
       "DESCRIPTION:درخواست کننده\\: فاطمه", "END:VEVENT", "END:VCALENDAR"
     ].join("\r\n");
     const mail = parsedMailToIncoming({
@@ -47,7 +47,7 @@ describe("mail content", () => {
         { filename: undefined, contentType: "text/calendar", contentDisposition: "attachment", size: ics.length, content: Buffer.from(ics) }
       ]
     } as any, { uid: 1, uidValidity: "1", mailbox: "INBOX" });
-    expect(mail.calendar).toMatchObject({ method: "REQUEST", summary: "ذخیره سازی مدارک ویدیویی بیمار", location: "جلسه آنلاین", organizer: { address: "marjan@example.com" } });
+    expect(mail.calendar).toMatchObject({ method: "REQUEST", summary: "ذخیره سازی مدارک ویدیویی بیمار", location: "جلسه آنلاین", organizer: { address: "organizer@example.com" } });
     expect(mail.calendar?.attendees).toHaveLength(1);
     expect(mail.calendar?.start).toMatchObject({ raw: "20260820T103000", timeZone: "Asia/Tehran", iso: "2026-08-20T07:00:00.000Z" });
     expect(mail.attachments[0]).toMatchObject({ filename: "attachment-1", classification: "calendar", isRealAttachment: false });

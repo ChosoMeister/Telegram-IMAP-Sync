@@ -16,7 +16,10 @@ const analysisSchema = z.object({
   keyFactsFa: z.array(z.string().min(1).max(160)).max(3).optional().default([]),
   amountsFa: z.array(z.string().min(1).max(100)).max(3).optional().default([]),
   riskFa: z.string().max(240).nullish().transform((value) => value ?? undefined),
-  actionLinks: z.array(z.string().url().max(300)).max(2).optional().default([]),
+  actionLinks: z.array(z.unknown()).optional().default([]).transform((values) => values.flatMap((value) => {
+    if (typeof value !== "string" || value.length > 300) return [];
+    try { new URL(value); return [value]; } catch { return []; }
+  }).slice(0, 2)),
   reason: z.string().min(1),
   actionOwner: z.enum(["self", "other", "shared", "unknown"]).optional().default("unknown")
 });
