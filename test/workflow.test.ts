@@ -13,13 +13,14 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
     answerCallbackQuery: vi.fn().mockResolvedValue(true), deleteMessages: vi.fn().mockResolvedValue(true),
     sendMessage: vi.fn().mockResolvedValue({ message_id: 200, chat: { id: 42 } }), editMessage: vi.fn().mockResolvedValue(true),
     sendMessageTo: vi.fn().mockResolvedValue({ message_id: 200, chat: { id: 42 } }),
-    sendDocument: vi.fn(), downloadFile: vi.fn().mockResolvedValue({ content: Buffer.from("voice"), filePath: "voice/file_1.ogg" }), getUpdates: vi.fn()
+    sendDocument: vi.fn(), downloadFile: vi.fn().mockResolvedValue({ content: Buffer.from("voice"), filePath: "voice/file_1.ogg" }), getUpdates: vi.fn(), status: vi.fn().mockReturnValue({ ok: true })
   };
   const imap = {
     archive, archiveMany: vi.fn(async (mails: any[]) => archive(mails[0])), fetchAttachment: vi.fn(), scanInbox: vi.fn().mockResolvedValue([]), connect: vi.fn(), waitForChanges: vi.fn(), stop: vi.fn(),
     findThread: vi.fn().mockResolvedValue([incoming]),
     sentContainsMessageId: vi.fn().mockResolvedValue(false), appendSent: vi.fn().mockResolvedValue(undefined),
     mailboxIdentity: vi.fn().mockReturnValue({ path: incoming.mailbox, uidValidity: incoming.uidValidity }), isConnected: vi.fn().mockReturnValue(true),
+    status: vi.fn().mockReturnValue({ connectionState: "connected", notificationMode: "idle", idleSupported: true, idleActive: true }), markReconnecting: vi.fn(),
     listInboxUids: vi.fn().mockResolvedValue(new Set([incoming.uid]))
   };
   const ai = {
@@ -40,6 +41,13 @@ describe("Done transaction", () => {
     await (s.app as any).handleText({ message_id: 900, chat: { id: 42 }, from: { id: 42 }, text: "/failed" });
     expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, "✅ عملیات ناموفق ثبت‌شده‌ای وجود ندارد.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]], true);
     expect(s.telegram.deleteMessages).toHaveBeenCalledWith([900]);
+    s.store.close();
+  });
+  it("shows the per-account IMAP notification mode in /accounts", async () => {
+    const s = setup();
+    await (s.app as any).handleText({ message_id: 902, chat: { id: 42 }, from: { id: 42 }, text: "/accounts" });
+    expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining("⚡ IDLE فعال"), expect.any(Array), true);
+    expect((s.app.status().accounts as any).primary.imap).toMatchObject({ connectionState: "connected", notificationMode: "idle" });
     s.store.close();
   });
   it("immediately retries a failed AI analysis from its Telegram button", async () => {

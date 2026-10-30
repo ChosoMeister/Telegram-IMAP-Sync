@@ -22,6 +22,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - Startup and periodic reconciliation list Inbox UIDs, then fetch and parse full MIME only for identities not already stored in SQLite.
 - A persisted pending item without a Telegram message is republished from SQLite, so an interrupted Bot API delivery does not require downloading MIME again.
 - IMAP disconnects make the health endpoint return `503`; a supervisor reconnects with capped exponential backoff and immediately reconciles after recovery.
+- ImapFlow Auto-IDLE remains enabled by default. Per-account health distinguishes an active IDLE session, the short connected period before Auto-IDLE starts, a server without IDLE using ImapFlow's polling fallback, and reconnecting/unavailable transport. The application does not run a competing manual `idle()` loop.
 - Telegram update offsets are persisted after each handled update.
 - An expired callback acknowledgement after restart is ignored so the replayed idempotent action can still finish before its offset is persisted.
 - Long-running per-mail actions edit the primary card immediately, use an atomic lock, and retain a short cooldown after completion so queued duplicate callbacks cannot repeat uploads or AI work.

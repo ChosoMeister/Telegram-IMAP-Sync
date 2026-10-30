@@ -103,7 +103,7 @@ export class MailBotApp {
     const learnedRules = this.learnedRules.list();
     return {
       ok: this.isHealthy(), imapConnected: this.accounts.every((account) => account.imap.isConnected()), syncRunning: this.syncRunning,
-      accounts: Object.fromEntries(this.accounts.map((account) => [account.id, { label: account.label, imapConnected: account.imap.isConnected(), lastSuccessfulSync: this.lastSuccessfulSync.get(account.id)?.toISOString(), inboxCount: this.inboxCount.get(account.id) ?? 0, smtp: account.smtp.status() }])),
+      accounts: Object.fromEntries(this.accounts.map((account) => [account.id, { label: account.label, imapConnected: account.imap.isConnected(), imap: account.imap.status(), lastSuccessfulSync: this.lastSuccessfulSync.get(account.id)?.toISOString(), inboxCount: this.inboxCount.get(account.id) ?? 0, smtp: account.smtp.status() }])),
       lastTelegramPoll: this.lastTelegramPoll?.toISOString(), inboxCount: [...this.inboxCount.values()].reduce((sum, count) => sum + count, 0),
       jobs: this.store.jobCounts(), ai: this.ai.status(), stt: this.stt?.status() ?? { enabled: false }, smtp: this.smtp.status(), telegram: this.telegram.status(),
       learnedRules: { total: learnedRules.length, enabled: learnedRules.filter((rule) => rule.enabled).length },
@@ -136,6 +136,7 @@ export class MailBotApp {
           if (!this.stopping) throw new Error("IMAP connection closed");
         } catch (error) {
           if (this.stopping) break;
+          account.imap.markReconnecting();
           this.logger.warn("IMAP disconnected; reconnect scheduled", {
             accountId: account.id, retryMs,
             error: error instanceof Error ? error.message : String(error)
@@ -790,7 +791,7 @@ export class MailBotApp {
         `کارت‌های Pending: ${status.pendingThreads}`,
         `پیام‌های Pending: ${status.pending}`,
         `Failed: ${status.failed}`,
-        ...Object.entries(status.accounts as Record<string, any>).map(([id, account]) => `${esc(account.label ?? id)}: ${account.imapConnected ? "✅" : "❌"} — Inbox ${account.inboxCount} — Sync ${esc(String(account.lastSuccessfulSync ?? "نامشخص"))}`),
+        ...Object.entries(status.accounts as Record<string, any>).map(([id, account]) => `${esc(account.label ?? id)}: ${account.imapConnected ? "✅" : "❌"} — ${this.renderImapMode(account.imap)} — Inbox ${account.inboxCount} — Sync ${esc(String(account.lastSuccessfulSync ?? "نامشخص"))}`),
         `آخرین Telegram Poll: ${esc(String(status.lastTelegramPoll ?? "نامشخص"))}`
       ].join("\n"));
       return;
@@ -804,7 +805,7 @@ export class MailBotApp {
     if (command === "/accounts") {
       const accounts = this.status().accounts as Record<string, any>;
       await this.sendCommandResult(message, ["<b>حساب‌های ایمیل</b>", ...Object.entries(accounts).map(([id, account]) =>
-        `${account.imapConnected ? "✅" : "❌"} ${esc(account.label ?? id)} — Inbox ${account.inboxCount} — SMTP ${account.smtp?.ok ? "✅" : "❌"}`
+        `${account.imapConnected ? "✅" : "❌"} ${esc(account.label ?? id)}\nIMAP: ${this.renderImapMode(account.imap)} — Inbox ${account.inboxCount}\nSMTP: ${account.smtp?.ok ? "✅ سالم" : account.smtp?.ok === false ? "❌ خطا" : "⚪ بررسی نشده"}`
       )].join("\n"));
       return;
     }
@@ -955,6 +956,15 @@ export class MailBotApp {
     const voiceTranscript = this.voiceTranscript(conversation.metadata);
     if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(conversation.metadata), voiceTranscript);
     else await this.showDraft(mail, draft, conversation.replyAll, voiceTranscript);
+  }
+
+  private renderImapMode(status?: { connectionState?: string; notificationMode?: string }): string {
+    if (status?.connectionState === "reconnecting") return "🔄 اتصال مجدد";
+    if (status?.connectionState === "connecting") return "⏳ در حال اتصال";
+    if (status?.notificationMode === "idle") return "⚡ IDLE فعال";
+    if (status?.notificationMode === "idle-pending") return "🟢 متصل؛ IDLE در انتظار";
+    if (status?.notificationMode === "polling-fallback") return "🔁 Polling fallback";
+    return "❌ قطع";
   }
 
   private async sendCommandResult(command: TelegramMessage, text: string, buttons?: Array<Array<{ text: string; callback_data: string; style?: "danger" | "success" | "primary" }>>): Promise<void> {

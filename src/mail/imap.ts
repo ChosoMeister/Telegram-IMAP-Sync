@@ -11,6 +11,7 @@ import { normalizeMessageId } from "./thread.js";
 export class ImapService {
   private client?: ImapFlow;
   private stopped = false;
+  private connectionState: "disconnected" | "connecting" | "connected" | "reconnecting" = "disconnected";
   constructor(private config: MailAccountAppConfig, private logger: Logger, private accountId = "primary", private accountLabel = "Primary") {}
 
   private createClient(): ImapFlow {
@@ -35,14 +36,44 @@ export class ImapService {
 
   async connect(): Promise<void> {
     if (this.client?.usable) return;
+    this.connectionState = "connecting";
     if (this.client) await this.client.logout().catch(() => undefined);
     this.client = this.createClient();
-    this.client.on("error", (error) => this.logger.warn("IMAP transport interrupted", { error: describeError(error) }));
-    await this.client.connect();
-    await this.client.mailboxOpen(this.config.IMAP_MAILBOX);
+    this.client.on("error", (error) => {
+      this.connectionState = "reconnecting";
+      this.logger.warn("IMAP transport interrupted", { error: describeError(error) });
+    });
+    this.client.on("close", () => { if (!this.stopped) this.connectionState = "reconnecting"; });
+    try {
+      await this.client.connect();
+      await this.client.mailboxOpen(this.config.IMAP_MAILBOX);
+      this.connectionState = "connected";
+    } catch (error) {
+      this.connectionState = "reconnecting";
+      throw error;
+    }
   }
 
   isConnected(): boolean { return Boolean(this.client?.usable && this.client.mailbox); }
+
+  status(): {
+    connectionState: "disconnected" | "connecting" | "connected" | "reconnecting";
+    notificationMode: "unavailable" | "idle" | "idle-pending" | "polling-fallback";
+    idleSupported: boolean;
+    idleActive: boolean;
+  } {
+    const connected = this.isConnected();
+    const idleSupported = Boolean(connected && this.client?.capabilities.has("IDLE"));
+    const idleActive = Boolean(idleSupported && this.client?.idling);
+    return {
+      connectionState: connected ? this.connectionState : this.connectionState === "connecting" ? "connecting" : this.connectionState === "reconnecting" ? "reconnecting" : "disconnected",
+      notificationMode: !connected ? "unavailable" : !idleSupported ? "polling-fallback" : idleActive ? "idle" : "idle-pending",
+      idleSupported,
+      idleActive
+    };
+  }
+
+  markReconnecting(): void { if (!this.stopped) this.connectionState = "reconnecting"; }
 
   mailboxIdentity(): { path: string; uidValidity: string } {
     const client = this.requireClient();
@@ -240,13 +271,21 @@ export class ImapService {
 
   async waitForChanges(onChange: () => Promise<void>): Promise<void> {
     const client = this.requireClient();
-    client.on("exists", () => { void onChange(); });
-    while (!this.stopped && client.usable) await new Promise((resolve) => setTimeout(resolve, 1000));
+    const handleExists = () => {
+      void onChange().catch((error) => this.logger.warn("IMAP change reconciliation failed", { error: describeError(error) }));
+    };
+    await new Promise<void>((resolve) => {
+      const handleClose = () => resolve();
+      client.on("exists", handleExists);
+      client.once("close", handleClose);
+      if (!client.usable || this.stopped) resolve();
+    }).finally(() => client.off("exists", handleExists));
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
     if (this.client?.usable) await this.client.logout().catch(() => undefined);
+    this.connectionState = "disconnected";
   }
   private requireClient(): ImapFlow { if (!this.client?.usable) throw new Error("IMAP is not connected"); return this.client; }
 }

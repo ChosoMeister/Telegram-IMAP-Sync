@@ -37,7 +37,7 @@ For a new additional account, validate its folders and SMTP in a one-off dry-run
 
 ## Health and status
 
-`http://127.0.0.1:18080/` returns `200` only while IMAP is usable and `503` while disconnected. JSON includes connection state, last successful reconciliation, last Telegram poll, Inbox/state counts, durable job counts, learned-rule totals, AI provider results, SMTP and Telegram activity, backup success/error, mode, and current time. Inside Telegram, `/status` reports the operational subset.
+`http://127.0.0.1:18080/` returns `200` only while IMAP is usable and `503` while disconnected. JSON includes each account's transport state and notification mode (`idle`, `idle-pending`, `polling-fallback`, or `unavailable`), last successful reconciliation, last Telegram poll, Inbox/state counts, durable job counts, learned-rule totals, AI provider results, SMTP and Telegram activity, backup success/error, mode, and current time. Inside Telegram, `/status` and `/accounts` report the operational subset. `idle-pending` is the normal short connected period before ImapFlow automatically enters IDLE; `polling-fallback` means the server did not advertise IDLE.
 
 Useful commands:
 
@@ -120,6 +120,7 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Ask AI reports unsupported attachment:** current extraction supports PDF, DOCX, XLSX, HTML, and text/CSV-like formats. Images require OCR; legacy DOC/XLS require a future isolated converter.
 - **AI feels stuck:** the primary Telegram card changes immediately to a progress state. Each provider is limited by `AI_TIMEOUT_MS` (45 seconds by default) before fallback; structured logs include the nested network code and cause.
 - **Brief IMAP warning followed by restored:** Exchange or the network closed the long-lived session. Reconciliation waits for the reconnect supervisor and retries automatically; investigate only when health remains `503` or reconnect does not follow.
+- **An account shows `Polling fallback`:** the server did not advertise the IMAP IDLE capability. ImapFlow falls back to its built-in polling behavior and the application's periodic Inbox reconciliation remains active; do not add a manual `client.idle()` loop.
 - **Telegram polling is stale:** health returns `503` after two minutes without a successful poll. Verify host and container DNS resolution plus TCP/443 reachability to `api.telegram.org`; a successful IMAP connection alone is not sufficient health.
 - **SELinux denies `mail-rules.json`:** current Compose uses a private `Z` relabel on the read-only config bind mount. Keep the project/config path dedicated to this service on enforcing AlmaLinux/RHEL hosts.
 - **AI job is failed:** health reports job counts and provider status. A background analysis becomes terminal after five provider failures; the email remains fully usable and interactive Ask AI can be retried later.

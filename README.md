@@ -39,7 +39,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Retry-safe SMTP, Sent-copy, and Archive transaction stages
 - Atomic per-mail action locks with duplicate-click cooldown, same-card progress, versioned SQLite migrations, and a durable AI analysis queue
 - Stable pre-send Message-ID and durable outbound RFC822 recovery state
-- Automatic IMAP reconnect with exponential backoff and disconnect-aware reconciliation
+- Automatic IMAP reconnect with exponential backoff, disconnect-aware reconciliation, and per-account Auto-IDLE/polling-fallback observability
 - Telegram rate-limit/transient-failure backoff without unsafe message-send retries
 - SQLite recovery state, IMAP-aware health endpoint, structured redacted logs
 - Online SQLite backups with configurable retention and optional gzip delivery to a dedicated private Telegram channel/group
