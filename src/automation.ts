@@ -8,16 +8,19 @@ export class AutomationService {
     private readonly archive: (mail: StoredMail) => Promise<void>) {}
 
   async evaluate(mail: StoredMail, eligibleNewMail: boolean): Promise<AutomationDecision | undefined> {
-    if (this.mode === "off" || !mail.analysis) return undefined;
+    if (this.mode === "off") return undefined;
     const policy = this.matchingPolicy(mail);
     if (!policy) return undefined;
+    const exactSender = Boolean(policy.senderAddress);
     const exception = policy.exceptions.find((value) => this.haystack(mail).includes(value.toLowerCase()));
     if (exception) return this.record(mail, policy, "skipped", `استثنا «${exception}» در ایمیل دیده شد؛ خودکارسازی اجرا نشد.`);
-    if (["critical", "high"].includes(mail.analysis.importance)) {
+    if (!exactSender && mail.analysis && ["critical", "high"].includes(mail.analysis.importance)) {
       return this.record(mail, policy, "skipped", "ایمیل مهم است؛ برای حفظ اعلان و بررسی کاربر خودکار آرشیو نشد.");
     }
     if (!eligibleNewMail) return this.record(mail, policy, "skipped", "ایمیل پیش از فعال‌شدن این حالت دریافت شده و خارج از دامنه خودکارسازی است.");
-    const reason = `قانون «${policy.name}» منطبق شد: پیام ${policy.category} است، اقدام مستقیم کاربر ندارد و استثنایی دیده نشد.`;
+    const reason = exactSender
+      ? `قانون «${policy.name}» با آدرس دقیق فرستنده ${policy.senderAddress} منطبق شد.`
+      : `قانون «${policy.name}» منطبق شد: پیام ${policy.category} است، اقدام مستقیم کاربر ندارد و استثنایی دیده نشد.`;
     if (this.mode === "observe") return this.record(mail, policy, "would_archive", reason);
     try {
       await this.archive(mail);
@@ -28,9 +31,11 @@ export class AutomationService {
   }
 
   private matchingPolicy(mail: StoredMail): AutomationPolicy | undefined {
-    return this.store.listAutomationPolicies(true)
-      .filter((policy) => policy.scope === "global" || policy.accountId === (mail.accountId ?? "primary"))
-      .find((policy) => this.matchesCategory(policy.category, mail));
+    const scoped = this.store.listAutomationPolicies(true)
+      .filter((policy) => policy.scope === "global" || policy.accountId === (mail.accountId ?? "primary"));
+    const senders = new Set(mail.from.map((sender) => sender.address.trim().toLowerCase()));
+    return scoped.find((policy) => Boolean(policy.senderAddress && senders.has(policy.senderAddress)))
+      ?? (mail.analysis ? scoped.find((policy) => !policy.senderAddress && this.matchesCategory(policy.category, mail)) : undefined);
   }
 
   private matchesCategory(category: AutomationPolicy["category"], mail: StoredMail): boolean {

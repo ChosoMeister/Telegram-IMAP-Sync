@@ -46,6 +46,20 @@ describe("automation observation and execution gates", () => {
     store.close();
   });
 
+  it("executes an explicitly confirmed exact-sender rule without depending on AI classification", async () => {
+    const store = new Store(":memory:");
+    const matching = store.upsertMail({ ...incoming, from: [{ address: "Monitoring@asiatech.ir" }] });
+    const other = store.upsertMail({ ...incoming, uid: 19, messageId: "<other-sender@example.com>", from: [{ address: "other@asiatech.ir" }] });
+    store.saveAutomationPolicy({ name: "مانیتورینگ آسیاتک", category: "informational", action: "archive", scope: "global",
+      exceptions: [], source: "user", senderAddress: "monitoring@asiatech.ir" });
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const service = new AutomationService(store, "execute", execute);
+    expect((await service.evaluate(store.getMail(matching.id)!, true))?.outcome).toBe("executed");
+    expect(await service.evaluate(store.getMail(other.id)!, true)).toBeUndefined();
+    expect(execute).toHaveBeenCalledOnce();
+    store.close();
+  });
+
   it("rejects an account-scoped policy without an account identity", () => {
     const store = new Store(":memory:");
     expect(() => store.saveAutomationPolicy({ name: "خبرنامه‌ها", category: "newsletter", action: "archive", scope: "account",

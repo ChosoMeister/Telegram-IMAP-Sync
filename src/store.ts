@@ -58,6 +58,16 @@ export interface TelegramCommand {
   attempts: number;
 }
 
+export interface PendingBulkAction {
+  id: number;
+  chatId: number;
+  messageId: number;
+  kind: "archive_sender_and_rule";
+  criteria: { senderAddress: string };
+  mailIds: number[];
+  state: "pending" | "complete" | "cancelled" | "failed";
+}
+
 export interface StoredConversationPlan {
   id: number;
   chatId: number;
@@ -343,6 +353,23 @@ export class Store {
       );
       CREATE INDEX automation_policies_match_idx ON automation_policies(status,scope,account_id,category);
       CREATE INDEX automation_decisions_mail_idx ON automation_decisions(mail_id,id);
+    `);
+    this.applyMigration(11, `
+      ALTER TABLE automation_policies ADD COLUMN sender_address TEXT NOT NULL DEFAULT '';
+      CREATE INDEX IF NOT EXISTS automation_policies_sender_idx ON automation_policies(status,sender_address);
+      CREATE TABLE IF NOT EXISTS pending_bulk_actions (
+        id INTEGER PRIMARY KEY,
+        chat_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK(kind='archive_sender_and_rule'),
+        criteria_json TEXT NOT NULL,
+        mail_ids_json TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending','complete','cancelled','failed')),
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(chat_id,message_id)
+      );
     `);
     for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
       const mail = JSON.parse(row.payload_json) as IncomingMail;
@@ -851,9 +878,10 @@ export class Store {
 
   saveAutomationPolicy(input: Omit<AutomationPolicy, "id" | "status">): AutomationPolicy {
     if (input.scope === "account" && !input.accountId) throw new Error("Account-scoped automation requires accountId");
-    const result = this.db.prepare(`INSERT INTO automation_policies(name,category,action,scope,account_id,exceptions_json,source)
-      VALUES(?,?,?,?,?,?,?)`).run(input.name, input.category, input.action, input.scope,
-        input.scope === "account" ? input.accountId ?? "" : "", JSON.stringify(input.exceptions), input.source);
+    const result = this.db.prepare(`INSERT INTO automation_policies(name,category,action,scope,account_id,exceptions_json,source,sender_address)
+      VALUES(?,?,?,?,?,?,?,?)`).run(input.name, input.category, input.action, input.scope,
+        input.scope === "account" ? input.accountId ?? "" : "", JSON.stringify(input.exceptions), input.source,
+        input.senderAddress?.trim().toLowerCase() ?? "");
     return this.getAutomationPolicy(Number(result.lastInsertRowid))!;
   }
 
@@ -865,6 +893,12 @@ export class Store {
   listAutomationPolicies(activeOnly = true): AutomationPolicy[] {
     return (this.db.prepare(`SELECT * FROM automation_policies ${activeOnly ? "WHERE status='active'" : ""} ORDER BY id DESC`).all() as unknown as any[])
       .map((row) => this.rowToAutomationPolicy(row));
+  }
+
+  findAutomationPolicyBySender(senderAddress: string): AutomationPolicy | undefined {
+    const row = this.db.prepare("SELECT * FROM automation_policies WHERE status='active' AND sender_address=? ORDER BY id DESC LIMIT 1")
+      .get(senderAddress.trim().toLowerCase()) as any;
+    return row ? this.rowToAutomationPolicy(row) : undefined;
   }
 
   setAutomationPolicyStatus(id: number, status: AutomationPolicy["status"]): AutomationPolicy | undefined {
@@ -899,7 +933,24 @@ export class Store {
   private rowToAutomationPolicy(row: any): AutomationPolicy {
     return { id: row.id, name: row.name, category: row.category, action: row.action, scope: row.scope,
       exceptions: JSON.parse(row.exceptions_json) as string[], status: row.status, source: row.source,
-      ...(row.account_id ? { accountId: row.account_id } : {}) };
+      ...(row.account_id ? { accountId: row.account_id } : {}), ...(row.sender_address ? { senderAddress: row.sender_address } : {}) };
+  }
+
+  createPendingBulkAction(input: Omit<PendingBulkAction, "id" | "state">): PendingBulkAction {
+    this.db.prepare(`INSERT INTO pending_bulk_actions(chat_id,message_id,kind,criteria_json,mail_ids_json)
+      VALUES(?,?,?,?,?)`).run(input.chatId, input.messageId, input.kind, JSON.stringify(input.criteria), JSON.stringify([...new Set(input.mailIds)]));
+    return this.getPendingBulkAction(input.chatId, input.messageId)!;
+  }
+
+  getPendingBulkAction(chatId: number, messageId: number): PendingBulkAction | undefined {
+    const row = this.db.prepare("SELECT * FROM pending_bulk_actions WHERE chat_id=? AND message_id=?").get(chatId, messageId) as any;
+    return row ? { id: row.id, chatId: row.chat_id, messageId: row.message_id, kind: row.kind,
+      criteria: JSON.parse(row.criteria_json), mailIds: JSON.parse(row.mail_ids_json), state: row.state } : undefined;
+  }
+
+  finishPendingBulkAction(id: number, state: Exclude<PendingBulkAction["state"], "pending">, error?: string): void {
+    this.db.prepare("UPDATE pending_bulk_actions SET state=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(state, error ?? null, id);
   }
 
   setState(id: number, state: StoredMail["state"], error?: string): void {

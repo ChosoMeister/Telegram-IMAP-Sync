@@ -49,6 +49,8 @@ A standalone Persian request to archive all calendar invitations creates a confi
 
 Direct text instructions sent as replies to a mail card are tracked as temporary Telegram conversation messages. The bot attempts to remove them as soon as the reviewed draft is ready. If Telegram deletion fails, their IDs remain attached to the mail so the durable cleanup after successful Reply, Forward, RSVP, or Archive retries them instead of silently losing the cleanup request.
 
+A standalone request containing an exact email address, an archive instruction, and an explicit future directive creates a combined sender-rule preview. Confirmation archives only the immutable Pending snapshot and then stores a global exact-address policy. Address comparison is case-insensitive and does not match neighboring addresses or domains. Exact-sender policies intentionally do not depend on AI category or importance, but they execute only while `AUTOMATION_MODE=execute`; `off` remains the operational kill switch. If any account group in the current snapshot fails, the future rule is not activated.
+
 Safe activation sequence:
 
 1. Keep `APP_MODE=live` only after normal archive commissioning is complete; set `AUTOMATION_MODE=observe` and recreate the container.

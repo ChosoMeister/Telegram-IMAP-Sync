@@ -142,6 +142,7 @@ export interface AutomationPolicy {
   exceptions: string[];
   status: "active" | "paused";
   source: "user";
+  senderAddress?: string;
 }
 
 export interface AutomationDecision {

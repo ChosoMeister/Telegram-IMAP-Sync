@@ -91,6 +91,34 @@ describe("Done transaction", () => {
     expect(s.store.getMail(s.id)?.state).toBe("pending");
     s.store.close();
   });
+  it("confirms current exact-sender archive and a future global sender rule without expanding the snapshot", async () => {
+    const archive = vi.fn().mockResolvedValue(undefined);
+    const s = setup(archive, "live", "execute");
+    const first = s.store.upsertMail({ ...incoming, uid: 311, messageId: "<monitoring-311@example.com>",
+      from: [{ address: "Monitoring@asiatech.ir" }], subject: "Monitoring alert 1" });
+    const second = s.store.upsertMail({ ...incoming, uid: 312, messageId: "<monitoring-312@example.com>",
+      from: [{ address: "monitoring@asiatech.ir" }], subject: "Monitoring alert 2" });
+
+    await (s.app as any).handleText({ message_id: 931, chat: { id: 42 }, from: { id: 42 },
+      text: "هر ایمیلی از Monitoring@asiatech.ir اومده رو ارشیو کن از این به بعد هم از این فرستنده باید ارشیو بشود" });
+
+    expect(s.imap.archiveMany).not.toHaveBeenCalled();
+    expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining("monitoring@asiatech.ir"), expect.arrayContaining([
+      expect.arrayContaining([expect.objectContaining({ callback_data: "sys:bulksender:confirm" })])
+    ]), true);
+    expect(s.store.getPendingBulkAction(42, 200)?.mailIds).toEqual([first.id, second.id]);
+
+    const arrivedAfterPreview = s.store.upsertMail({ ...incoming, uid: 313, messageId: "<monitoring-313@example.com>",
+      from: [{ address: "monitoring@asiatech.ir" }], subject: "Monitoring alert 3" });
+    await (s.app as any).handleSystemCallback("confirm-bulk-sender", "sys:bulksender:confirm", 200, 42);
+
+    expect(s.imap.archiveMany.mock.calls[0]![0]).toHaveLength(2);
+    expect(s.store.getMail(first.id)?.state).toBe("done");
+    expect(s.store.getMail(second.id)?.state).toBe("done");
+    expect(s.store.getMail(arrivedAfterPreview.id)?.state).toBe("pending");
+    expect(s.store.findAutomationPolicyBySender("MONITORING@ASIATECH.IR")).toMatchObject({ status: "active", scope: "global" });
+    s.store.close();
+  });
   it("durably accepts a Telegram message before processing and does not execute duplicate updates", async () => {
     const s = setup();
     const update = { update_id: 700, message: { message_id: 900, chat: { id: 42 }, from: { id: 42 }, text: "/status" } };

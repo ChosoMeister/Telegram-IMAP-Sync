@@ -217,6 +217,11 @@ export class MailBotApp {
         if (!result.created) {
           continue;
         }
+        const createdMail = this.store.getMail(result.id)!;
+        const activatedAt = Number(this.store.getKv(this.automationActivationKey()) ?? 0);
+        const automationDecision = await this.automation.evaluate(createdMail,
+          Boolean(activatedAt && (this.store.mailCreatedAt(result.id) ?? 0) >= activatedAt));
+        if (automationDecision?.outcome === "executed") continue;
       }
       const liveUids = await account.imap.listInboxUids();
       this.inboxCount.set(account.id, liveUids.size);
@@ -384,6 +389,16 @@ export class MailBotApp {
         await this.telegram.deleteMessages([messageId]).catch(() => false);
       } else if (bulkCalendarMatch[1] === "view") await this.showBulkCalendarSnapshot(chatId, messageId);
       else await this.confirmBulkCalendarArchive(chatId, messageId);
+      return;
+    }
+    const bulkSenderMatch = /^sys:bulksender:(confirm|view|cancel)$/.exec(data);
+    if (bulkSenderMatch && messageId) {
+      if (bulkSenderMatch[1] === "cancel") {
+        const action = this.store.getPendingBulkAction(chatId, messageId);
+        if (action?.state === "pending") this.store.finishPendingBulkAction(action.id, "cancelled");
+        await this.telegram.deleteMessages([messageId]).catch(() => false);
+      } else if (bulkSenderMatch[1] === "view") await this.showBulkSenderSnapshot(chatId, messageId);
+      else await this.confirmBulkSenderArchive(chatId, messageId);
       return;
     }
     const ruleMatch = /^sys:rule:(\d+):toggle$/.exec(data);
@@ -1313,6 +1328,11 @@ export class MailBotApp {
 
   private async handleUnboundText(message: TelegramMessage): Promise<void> {
     const text = message.text!.trim();
+    const senderRule = this.parseBulkSenderArchiveRequest(text);
+    if (senderRule) {
+      await this.previewBulkSenderArchive(message, senderRule);
+      return;
+    }
     if (this.isBulkCalendarArchiveRequest(text)) {
       await this.previewBulkCalendarArchive(message);
       return;
@@ -1443,6 +1463,123 @@ export class MailBotApp {
 
   private faNumber(value: number): string {
     return new Intl.NumberFormat("fa-IR", { useGrouping: false }).format(value);
+  }
+
+  private parseBulkSenderArchiveRequest(text: string): string | undefined {
+    const normalized = text.trim().replace(/ي/g, "ی").replace(/ك/g, "ک");
+    const address = normalized.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu)?.[0]?.toLowerCase();
+    const archive = /(?:آرشیو|ارشیو|از اینباکس (?:بردار|خارج کن))/u.test(normalized);
+    const future = /(?:از این به بعد|همیشه|بعد از این|در آینده|باید .*آرشیو|باید .*ارشیو)/u.test(normalized);
+    return address && archive && future ? address : undefined;
+  }
+
+  private senderArchiveButtons(): Array<Array<{ text: string; callback_data: string; style?: "danger" | "success" | "primary" }>> {
+    return [
+      [{ text: "✅ آرشیو فعلی‌ها و فعال‌سازی قانون", callback_data: "sys:bulksender:confirm", style: "danger" }],
+      [{ text: "👁 مشاهده موارد فعلی", callback_data: "sys:bulksender:view", style: "primary" },
+        { text: "❌ لغو", callback_data: "sys:bulksender:cancel" }]
+    ];
+  }
+
+  private senderMatches(mail: StoredMail, senderAddress: string): boolean {
+    const target = senderAddress.trim().toLowerCase();
+    return mail.from.some((sender) => sender.address.trim().toLowerCase() === target);
+  }
+
+  private async previewBulkSenderArchive(message: TelegramMessage, senderAddress: string): Promise<void> {
+    const mails = this.store.listPending().filter((mail) => this.senderMatches(mail, senderAddress));
+    const accounts = new Map<string, { label: string; count: number }>();
+    for (const mail of mails) {
+      const id = mail.accountId ?? this.primaryAccountId;
+      const current = accounts.get(id);
+      accounts.set(id, { label: mail.accountLabel ?? id, count: (current?.count ?? 0) + 1 });
+    }
+    const text = ["<b>پیش‌نمایش قانون فرستنده</b>", `<b>آدرس دقیق:</b> <code>${esc(senderAddress)}</code>`,
+      `ایمیل‌های Pending فعلی: ${this.faNumber(mails.length)}`,
+      ...[...accounts.values()].map((account) => `• ${esc(account.label)}: ${this.faNumber(account.count)}`), "",
+      "پس از تأیید، فقط همین snapshot آرشیو می‌شود و یک قانون سراسری برای آرشیو خودکار تمام ایمیل‌های آینده از همین آدرس دقیق فعال خواهد شد؛ امتیاز اهمیت AI مانع اجرای این قانون صریح نمی‌شود."
+    ].join("\n");
+    const sent = await this.telegram.sendMessageTo(message.chat.id, text, this.senderArchiveButtons(), true);
+    this.store.createPendingBulkAction({ chatId: sent.chat.id, messageId: sent.message_id, kind: "archive_sender_and_rule",
+      criteria: { senderAddress }, mailIds: mails.map((mail) => mail.id) });
+    await this.telegram.deleteMessages([message.message_id]).catch(() => false);
+  }
+
+  private async showBulkSenderSnapshot(chatId: number, messageId: number): Promise<void> {
+    const action = this.store.getPendingBulkAction(chatId, messageId);
+    if (!action || action.state !== "pending") {
+      await this.telegram.editMessage(messageId, "این پیش‌نمایش دیگر معتبر نیست.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+      return;
+    }
+    const mails = action.mailIds.map((id) => this.store.getMail(id)).filter((mail): mail is StoredMail => Boolean(mail));
+    const items = mails.slice(0, 20).map((mail, index) =>
+      `${this.faNumber(index + 1)}. [${esc(mail.accountLabel ?? mail.accountId ?? this.primaryAccountId)}] ${esc(mail.subject)}`);
+    await this.telegram.editMessage(messageId, [
+      `<b>ایمیل‌های فعلی از ${esc(action.criteria.senderAddress)}</b>`,
+      ...(items.length ? items : ["مورد Pending فعلی وجود ندارد؛ فقط قانون آینده فعال خواهد شد."]),
+      ...(mails.length > items.length ? [`… و ${this.faNumber(mails.length - items.length)} مورد دیگر`] : [])
+    ].join("\n"), this.senderArchiveButtons());
+  }
+
+  private async confirmBulkSenderArchive(chatId: number, messageId: number): Promise<void> {
+    const action = this.store.getPendingBulkAction(chatId, messageId);
+    if (!action || action.state !== "pending") {
+      await this.telegram.editMessage(messageId, "این پیش‌نمایش منقضی یا قبلاً اجرا شده است.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+      return;
+    }
+    const resolved = action.mailIds.map((id) => this.store.getMail(id));
+    if (resolved.some((mail) => !mail || !this.senderMatches(mail, action.criteria.senderAddress))) {
+      this.store.finishPendingBulkAction(action.id, "failed", "snapshot validation failed");
+      await this.telegram.editMessage(messageId, "❌ snapshot تغییر کرده است؛ هیچ ایمیلی آرشیو و هیچ قانونی فعال نشد.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+      return;
+    }
+    if (this.config.APP_MODE !== "live") {
+      await this.telegram.editMessage(messageId, "🧪 حالت آزمایشی فعال است؛ ایمیل یا قانون تغییر نکرد.", this.senderArchiveButtons());
+      return;
+    }
+    const actionable = resolved.filter((mail): mail is StoredMail => Boolean(mail && (mail.state === "pending" || mail.state === "failed")));
+    await this.telegram.editMessage(messageId, `⏳ در حال آرشیو ${this.faNumber(actionable.length)} ایمیل و ثبت قانون فرستنده…`, []);
+    const groups = new Map<string, StoredMail[]>();
+    for (const mail of actionable) {
+      const accountId = mail.accountId ?? this.primaryAccountId;
+      groups.set(accountId, [...(groups.get(accountId) ?? []), mail]);
+    }
+    let archived = 0;
+    const failures: string[] = [];
+    for (const mails of groups.values()) {
+      for (const mail of mails) this.store.setState(mail.id, "processing");
+      try {
+        await this.imapFor(mails[0]!).archiveMany(mails);
+        for (const mail of mails) {
+          this.store.setState(mail.id, "done");
+          this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
+          if (mail.telegramMessageIds.length) this.store.enqueueJob("telegram_cleanup", mail.id, { reason: "bulk_sender_archive" });
+        }
+        archived += mails.length;
+      } catch (error) {
+        const reason = describeError(error);
+        for (const mail of mails) this.store.setState(mail.id, "failed", reason);
+        failures.push(`${mails[0]!.accountLabel ?? mails[0]!.accountId ?? this.primaryAccountId}: ${reason}`);
+      }
+    }
+    if (failures.length) {
+      this.store.finishPendingBulkAction(action.id, "failed", failures.join(" | "));
+      await this.processJobs();
+      await this.syncInbox(true);
+      await this.telegram.editMessage(messageId, [`⚠️ ${this.faNumber(archived)} ایمیل آرشیو شد، اما قانون آینده به‌دلیل شکست بخشی از snapshot فعال نشد.`,
+        ...failures.map((failure) => `• ${esc(failure)}`)].join("\n"), [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+      return;
+    }
+    const existing = this.store.findAutomationPolicyBySender(action.criteria.senderAddress);
+    const policy = existing ?? this.store.saveAutomationPolicy({ name: `فرستنده ${action.criteria.senderAddress}`,
+      category: "informational", action: "archive", scope: "global", exceptions: [], source: "user",
+      senderAddress: action.criteria.senderAddress });
+    this.store.finishPendingBulkAction(action.id, "complete");
+    await this.processJobs();
+    await this.syncInbox(true);
+    this.logger.info("Exact-sender archive rule confirmed", { senderAddress: action.criteria.senderAddress, archived, policyId: policy.id });
+    await this.telegram.editMessage(messageId, `✅ ${this.faNumber(archived)} ایمیل فعلی آرشیو شد و قانون آینده برای ${esc(action.criteria.senderAddress)} فعال شد.`,
+      [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
   }
 
   private renderSearchResults(query: string): string {
