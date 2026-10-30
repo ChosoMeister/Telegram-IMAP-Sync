@@ -37,6 +37,34 @@ describe("Store", () => {
     expect(store.getMail(id)?.telegramMessageIds).toEqual([10, 11]);
     expect(store.getConversation(42)).toMatchObject({ mailId: id, replyAll: true, draft: "draft", metadata: { kind: "forward", recipients: ["colleague@example.com"] } });
   });
+  it("keeps immutable Telegram message references after a card is replaced", () => {
+    const { id } = store.upsertMail(incoming);
+    store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: id, role: "card", scopeMailIds: [id] });
+    store.deactivateTelegramMessage(42, 100);
+    store.registerTelegramMessage({ chatId: 42, messageId: 101, mailId: id, role: "card", scopeMailIds: [id] });
+
+    expect(store.resolveTelegramMessage(42, 100)).toMatchObject({ mailId: id, active: false, scopeMailIds: [id] });
+    expect(store.resolveTelegramMessage(42, 101)).toMatchObject({ mailId: id, active: true, scopeMailIds: [id] });
+  });
+  it("backfills references for cards created before the mapping migration", () => {
+    const { id } = store.upsertMail(incoming);
+    store.setTelegramMessages(id, [321, 322]);
+    expect(store.backfillTelegramCardReferences(42)).toBe(1);
+    expect(store.backfillTelegramCardReferences(42)).toBe(0);
+    expect(store.resolveTelegramMessage(42, 321)).toMatchObject({ mailId: id, role: "card", active: true });
+    expect(store.resolveTelegramMessage(42, 322)).toBeUndefined();
+  });
+  it("durably accepts each Telegram update once and leases commands independently", () => {
+    const first = store.enqueueTelegramCommand({ updateId: 501, userId: 42, chatId: 42, messageId: 90, text: "اول" });
+    const duplicate = store.enqueueTelegramCommand({ updateId: 501, userId: 42, chatId: 42, messageId: 90, text: "اول" });
+    const second = store.enqueueTelegramCommand({ updateId: 502, userId: 42, chatId: 42, messageId: 91, text: "دوم" });
+
+    expect(first).toBe(true);
+    expect(duplicate).toBe(false);
+    expect(second).toBe(true);
+    expect(store.leaseTelegramCommand()).toMatchObject({ updateId: 501, text: "اول", attempts: 1 });
+    expect(store.leaseTelegramCommand()).toMatchObject({ updateId: 502, text: "دوم", attempts: 1 });
+  });
   it("keeps independent drafts for multiple mails", () => {
     const first = store.upsertMail(incoming);
     const second = store.upsertMail({ ...incoming, uid: 8 });

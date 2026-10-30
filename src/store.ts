@@ -37,6 +37,27 @@ export interface DurableJob {
   attempts: number;
 }
 
+export interface TelegramMessageReference {
+  chatId: number;
+  messageId: number;
+  mailId: number;
+  role: "card" | "prompt" | "result";
+  scopeMailIds: number[];
+  active: boolean;
+}
+
+export interface TelegramCommand {
+  id: number;
+  updateId: number;
+  userId: number;
+  chatId: number;
+  messageId: number;
+  replyToMessageId?: number;
+  text?: string;
+  voice?: Record<string, unknown>;
+  attempts: number;
+}
+
 export class Store {
   private readonly db: DatabaseSync;
   constructor(path: string, private readonly primaryAccountId = "primary", private readonly primaryAccountLabel = "Primary") {
@@ -182,6 +203,38 @@ export class Store {
         details_json TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
+    `);
+    this.applyMigration(6, `
+      CREATE TABLE telegram_message_refs (
+        chat_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        mail_id INTEGER NOT NULL REFERENCES mails(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK(role IN ('card','prompt','result')),
+        scope_mail_ids_json TEXT NOT NULL,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(chat_id,message_id)
+      );
+      CREATE INDEX telegram_message_refs_mail_idx ON telegram_message_refs(mail_id,active);
+      CREATE TABLE telegram_commands (
+        id INTEGER PRIMARY KEY,
+        update_id INTEGER NOT NULL UNIQUE,
+        telegram_user_id INTEGER NOT NULL,
+        chat_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        reply_to_message_id INTEGER,
+        text TEXT,
+        voice_json TEXT,
+        state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','running','complete','failed')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        available_at INTEGER NOT NULL DEFAULT 0,
+        lease_until INTEGER,
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX telegram_commands_ready_idx ON telegram_commands(state,available_at);
     `);
     for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
       const mail = JSON.parse(row.payload_json) as IncomingMail;
@@ -460,6 +513,74 @@ export class Store {
   setTelegramMessages(id: number, ids: number[], createdAt = new Date()): void {
     this.db.prepare("UPDATE mails SET telegram_ids_json=?,telegram_created_at=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
       .run(JSON.stringify(ids), createdAt.toISOString(), id);
+  }
+
+  registerTelegramMessage(input: Omit<TelegramMessageReference, "active">): void {
+    this.db.prepare(`INSERT INTO telegram_message_refs(chat_id,message_id,mail_id,role,scope_mail_ids_json)
+      VALUES(?,?,?,?,?) ON CONFLICT(chat_id,message_id) DO UPDATE SET
+      mail_id=excluded.mail_id,role=excluded.role,scope_mail_ids_json=excluded.scope_mail_ids_json,
+      active=1,updated_at=CURRENT_TIMESTAMP`)
+      .run(input.chatId, input.messageId, input.mailId, input.role, JSON.stringify(input.scopeMailIds));
+  }
+
+  deactivateTelegramMessage(chatId: number, messageId: number): void {
+    this.db.prepare("UPDATE telegram_message_refs SET active=0,updated_at=CURRENT_TIMESTAMP WHERE chat_id=? AND message_id=?")
+      .run(chatId, messageId);
+  }
+
+  resolveTelegramMessage(chatId: number, messageId: number): TelegramMessageReference | undefined {
+    const row = this.db.prepare("SELECT * FROM telegram_message_refs WHERE chat_id=? AND message_id=?")
+      .get(chatId, messageId) as any;
+    if (!row) return undefined;
+    return { chatId: row.chat_id, messageId: row.message_id, mailId: row.mail_id, role: row.role,
+      scopeMailIds: JSON.parse(row.scope_mail_ids_json) as number[], active: Boolean(row.active) };
+  }
+
+  backfillTelegramCardReferences(chatId: number): number {
+    let inserted = 0;
+    for (const row of this.db.prepare("SELECT id,telegram_ids_json FROM mails WHERE telegram_ids_json!='[]'").all() as unknown as Array<{ id: number; telegram_ids_json: string }>) {
+      const messageId = (JSON.parse(row.telegram_ids_json) as number[])[0];
+      if (!messageId || this.resolveTelegramMessage(chatId, messageId)) continue;
+      this.registerTelegramMessage({ chatId, messageId, mailId: row.id, role: "card",
+        scopeMailIds: this.threadMembers(row.id).map((mail) => mail.id) });
+      inserted++;
+    }
+    return inserted;
+  }
+
+  enqueueTelegramCommand(input: { updateId: number; userId: number; chatId: number; messageId: number; replyToMessageId?: number; text?: string; voice?: Record<string, unknown> }): boolean {
+    const result = this.db.prepare(`INSERT OR IGNORE INTO telegram_commands
+      (update_id,telegram_user_id,chat_id,message_id,reply_to_message_id,text,voice_json) VALUES(?,?,?,?,?,?,?)`)
+      .run(input.updateId, input.userId, input.chatId, input.messageId, input.replyToMessageId ?? null,
+        input.text ?? null, input.voice ? JSON.stringify(input.voice) : null);
+    return result.changes === 1;
+  }
+
+  leaseTelegramCommand(leaseMs = 120_000): TelegramCommand | undefined {
+    const now = Date.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE telegram_commands SET state='queued',lease_until=NULL WHERE state='running' AND lease_until<=?").run(now);
+      const row = this.db.prepare(`SELECT * FROM telegram_commands WHERE state='queued' AND available_at<=?
+        ORDER BY id LIMIT 1`).get(now) as any;
+      if (!row) { this.db.exec("COMMIT"); return undefined; }
+      this.db.prepare(`UPDATE telegram_commands SET state='running',attempts=attempts+1,lease_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+        .run(now + leaseMs, row.id);
+      this.db.exec("COMMIT");
+      return { id: row.id, updateId: row.update_id, userId: row.telegram_user_id, chatId: row.chat_id,
+        messageId: row.message_id, ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
+        ...(row.text ? { text: row.text } : {}), ...(row.voice_json ? { voice: JSON.parse(row.voice_json) as Record<string, unknown> } : {}),
+        attempts: row.attempts + 1 };
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  completeTelegramCommand(id: number): void {
+    this.db.prepare("UPDATE telegram_commands SET state='complete',lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(id);
+  }
+
+  failTelegramCommand(id: number, error: string, retryDelayMs = 5000, terminal = false): void {
+    this.db.prepare(`UPDATE telegram_commands SET state=?,available_at=?,lease_until=NULL,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+      .run(terminal ? "failed" : "queued", Date.now() + retryDelayMs, error, id);
   }
 
   setState(id: number, state: StoredMail["state"], error?: string): void {

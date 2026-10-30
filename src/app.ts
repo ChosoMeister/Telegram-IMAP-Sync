@@ -21,6 +21,7 @@ import type { TranscriptConsensus } from "./ai.js";
 import { SafeScheduler } from "./scheduler.js";
 import { DurableJobWorker } from "./jobs.js";
 import { effectLabel, LearnedRuleService, type FeedbackChoice, type RuleProposal } from "./learned-rules.js";
+import { planConversation } from "./conversation/planner.js";
 
 export class MailBotApp {
   private readonly startedAt = new Date();
@@ -55,6 +56,8 @@ export class MailBotApp {
   }
 
   async start(): Promise<void> {
+    const backfilledReferences = this.store.backfillTelegramCardReferences(this.config.TELEGRAM_USER_ID);
+    if (backfilledReferences) this.logger.info("Existing Telegram card references backfilled", { count: backfilledReferences });
     for (const account of this.accounts) {
       await this.connectAccount(account).catch((error) => this.logger.warn("Mail account startup deferred to reconnect supervisor", { accountId: account.id, error: describeError(error) }));
       void account.smtp.verify().catch((error) => this.logger.warn("SMTP verification failed; inbound mail remains available", {
@@ -77,6 +80,7 @@ export class MailBotApp {
     this.scheduler.every("inbox-reconciliation", this.config.IMAP_RECONCILE_SECONDS * 1000, () => this.syncInbox(false));
     this.scheduler.every("telegram-queue-rotation", 60 * 60 * 1000, () => this.rotatePending());
     this.scheduler.every("durable-jobs", 2_000, () => this.processJobs());
+    this.scheduler.every("telegram-commands", 1_000, () => this.processTelegramCommands());
     const purge = () => {
       const removed = this.store.purgeCompleted(this.config.DATA_RETENTION_DAYS);
       if (removed) this.logger.info("Expired completed local records purged", { removed, retentionDays: this.config.DATA_RETENTION_DAYS });
@@ -230,6 +234,8 @@ export class MailBotApp {
     const thread = this.store.threadMembers(mail.id);
     const sent = await this.telegram.sendMessage(renderMail(mail, thread), mailButtons(mail, thread), silent);
     this.store.setTelegramMessages(mail.id, [sent.message_id]);
+    this.store.registerTelegramMessage({ chatId: sent.chat.id, messageId: sent.message_id, mailId: mail.id,
+      role: "card", scopeMailIds: thread.map((member) => member.id) });
   }
 
   private async enrichTelegram(mail: StoredMail): Promise<void> {
@@ -276,8 +282,11 @@ export class MailBotApp {
       const oldIds = [...mail.telegramMessageIds];
       const thread = this.store.threadMembers(mail.id);
       const sent = await this.telegram.sendMessage(renderMail(mail, thread), mailButtons(mail, thread), true);
+      this.store.registerTelegramMessage({ chatId: sent.chat.id, messageId: sent.message_id, mailId: mail.id,
+        role: "card", scopeMailIds: thread.map((member) => member.id) });
       this.store.setTelegramMessages(mail.id, [sent.message_id, ...oldIds]);
       if (oldIds.length) await this.telegram.deleteMessages(oldIds).catch(() => false);
+      for (const oldId of oldIds) this.store.deactivateTelegramMessage(this.config.TELEGRAM_USER_ID, oldId);
       this.store.setTelegramMessages(mail.id, [sent.message_id]);
     }
     this.logger.info("Pending Telegram queue rotated", { count: pending.length });
@@ -290,16 +299,17 @@ export class MailBotApp {
         const updates = await this.telegram.getUpdates(offset);
         this.lastTelegramPoll = new Date();
         for (const update of updates) {
-          offset = Math.max(offset, update.update_id + 1);
           try {
             await this.handleUpdate(update);
+            offset = Math.max(offset, update.update_id + 1);
+            this.store.setKv("telegram_offset", String(offset));
           } catch (error) {
             this.logger.error("Telegram update handling failed", {
               updateId: update.update_id,
               error: error instanceof Error ? error.message : String(error)
             });
-          } finally {
-            this.store.setKv("telegram_offset", String(offset));
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            break;
           }
         }
       } catch (error) {
@@ -314,7 +324,30 @@ export class MailBotApp {
     if (userId !== this.config.TELEGRAM_USER_ID) return;
     if (update.callback_query?.data?.startsWith("sys:")) await this.handleSystemCallback(update.callback_query.id, update.callback_query.data, update.callback_query.message?.message_id);
     else if (update.callback_query?.data) await this.handleCallback(update.callback_query.id, update.callback_query.data);
-    else if (update.message?.text || update.message?.voice) await this.handleText(update.message);
+    else if (update.message?.text || update.message?.voice) {
+      this.store.enqueueTelegramCommand({ updateId: update.update_id, userId, chatId: update.message.chat.id,
+        messageId: update.message.message_id,
+        ...(update.message.reply_to_message ? { replyToMessageId: update.message.reply_to_message.message_id } : {}),
+        ...(update.message.text ? { text: update.message.text } : {}),
+        ...(update.message.voice ? { voice: update.message.voice as unknown as Record<string, unknown> } : {}) });
+      await this.processTelegramCommands();
+    }
+  }
+
+  private async processTelegramCommands(): Promise<void> {
+    for (let command = this.store.leaseTelegramCommand(); command; command = this.store.leaseTelegramCommand()) {
+      try {
+        await this.handleText({ message_id: command.messageId, chat: { id: command.chatId }, from: { id: command.userId },
+          ...(command.replyToMessageId ? { reply_to_message: { message_id: command.replyToMessageId } } : {}),
+          ...(command.text ? { text: command.text } : {}),
+          ...(command.voice ? { voice: command.voice as NonNullable<TelegramMessage["voice"]> } : {}) });
+        this.store.completeTelegramCommand(command.id);
+      } catch (error) {
+        const reason = describeError(error);
+        this.store.failTelegramCommand(command.id, reason, Math.min(60_000, 2_000 * (2 ** command.attempts)), command.attempts >= 5);
+        this.logger.warn("Durable Telegram command failed", { updateId: command.updateId, attempts: command.attempts, error: reason });
+      }
+    }
   }
 
   private async handleSystemCallback(callbackId: string, data: string, messageId?: number): Promise<void> {
@@ -842,7 +875,27 @@ export class MailBotApp {
       return;
     }
     const promptMessageId = message.reply_to_message?.message_id;
-    const conversation = promptMessageId ? this.store.getConversationByPrompt(this.config.TELEGRAM_USER_ID, promptMessageId) : undefined;
+    let conversation = promptMessageId ? this.store.getConversationByPrompt(this.config.TELEGRAM_USER_ID, promptMessageId) : undefined;
+    if (!conversation && promptMessageId && message.text?.trim()) {
+      const reference = this.store.resolveTelegramMessage(message.chat.id, promptMessageId);
+      const referencedMail = reference ? this.store.getMail(reference.mailId) : undefined;
+      if (reference?.role === "card" && referencedMail) {
+        const intent = planConversation(message.text);
+        if (intent.kind === "archive") {
+          await this.editPrimary(referencedMail, "آیا این ایمیل از Inbox خارج و آرشیو شود؟", [[
+            { text: "✅ تأیید و آرشیو", callback_data: `m:${referencedMail.id}:done`, style: "success" },
+            { text: "↩️ انصراف", callback_data: `m:${referencedMail.id}:summary` }
+          ]]);
+          return;
+        }
+        if (intent.kind === "reply") return this.startReply(referencedMail, intent.replyAll);
+        if (intent.kind === "forward") return this.startForward(referencedMail);
+        if (intent.kind === "cancel") { this.store.clearConversation(this.config.TELEGRAM_USER_ID, referencedMail.id); return this.showSummary(referencedMail); }
+        this.store.setConversation(this.config.TELEGRAM_USER_ID, referencedMail.id, "ai_question", false, "formal", undefined,
+          { kind: "ask", context: "mail", immutableScopeMailIds: reference.scopeMailIds, sourceMessageId: promptMessageId });
+        conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID, referencedMail.id);
+      }
+    }
     if (!conversation || !["instruction", "voice_instruction", "voice_transcript_edit", "manual_edit", "forward_recipients", "ai_question"].includes(conversation.mode)) {
       const active = this.store.getConversation(this.config.TELEGRAM_USER_ID);
       if (active && ["instruction", "voice_instruction", "voice_transcript_edit", "manual_edit", "forward_recipients", "ai_question"].includes(active.mode)) {

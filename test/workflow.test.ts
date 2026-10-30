@@ -36,6 +36,34 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
 }
 
 describe("Done transaction", () => {
+  it("durably accepts a Telegram message before processing and does not execute duplicate updates", async () => {
+    const s = setup();
+    const update = { update_id: 700, message: { message_id: 900, chat: { id: 42 }, from: { id: 42 }, text: "/status" } };
+    await (s.app as any).handleUpdate(update);
+    await (s.app as any).handleUpdate(update);
+    expect(s.telegram.sendMessageTo).toHaveBeenCalledTimes(1);
+    s.store.close();
+  });
+  it("resolves a direct Reply to the immutable email card reference", async () => {
+    const s = setup();
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    await (s.app as any).handleText({ message_id: 901, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 100 }, text: "این ایمیل چه اقدامی از من می‌خواهد؟" });
+    expect(s.ai.ask).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "این ایمیل چه اقدامی از من می‌خواهد؟", [], "");
+    expect(s.store.getConversation(42, s.id)).toBeUndefined();
+    s.store.close();
+  });
+  it("requires confirmation before a conversational archive action", async () => {
+    const s = setup();
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    await (s.app as any).handleText({ message_id: 903, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 100 }, text: "این رو آرشیو کن" });
+    expect(s.archive).not.toHaveBeenCalled();
+    expect(s.telegram.editMessage).toHaveBeenCalledWith(100, expect.stringContaining("آیا این ایمیل"), expect.arrayContaining([
+      expect.arrayContaining([expect.objectContaining({ callback_data: `m:${s.id}:done` })])
+    ]));
+    s.store.close();
+  });
   it("renders operational commands as dismissible messages and removes the typed command", async () => {
     const s = setup();
     await (s.app as any).handleText({ message_id: 900, chat: { id: 42 }, from: { id: 42 }, text: "/failed" });

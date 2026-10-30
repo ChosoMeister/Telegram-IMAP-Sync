@@ -7,6 +7,9 @@
 - Stage compressed Telegram backups on the persistent backup volume instead of the bounded container tmpfs.
 - Add per-account IMAP Auto-IDLE and reconnect observability with dedicated regression coverage.
 - Upgrade Nodemailer and Vitest to patched releases and remove personal data from public test fixtures.
+- Persist inbound Telegram text/Voice commands before advancing update offsets and retry interrupted processing from SQLite.
+- Preserve immutable historical card-to-mail references across rotation and backfill existing cards without republishing them.
+- Route direct Reply-to-card Persian intents to bounded Ask, Reply, Reply All, Forward, Cancel, and confirmation-gated Archive actions.
 
 ## Unreleased
 

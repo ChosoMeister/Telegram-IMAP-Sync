@@ -13,7 +13,7 @@ Telegram long polling <── action controller <──────────�
         └── reply/calendar workflow ──> durable RFC822 ──> SMTP ──> Sent APPEND ──> IMAP MOVE
 ```
 
-The service uses direct adapters rather than coupling domain state to a bot framework. SQLite runs in WAL mode and stores mail identity, exact RFC-derived thread keys, normalized attachment classification, AI results, Telegram message IDs, update offsets, mail-scoped conversations with exact ForceReply prompt IDs, outbound transactions, action locks, user-confirmed learned analysis rules and their audit events, schema migrations, and durable jobs. Navigating a different card cannot clear another mail's draft or AI question.
+The service uses direct adapters rather than coupling domain state to a bot framework. SQLite runs in WAL mode and stores mail identity, exact RFC-derived thread keys, normalized attachment classification, AI results, immutable Telegram message-to-mail references, accepted inbound Telegram commands, update offsets, mail-scoped conversations with exact ForceReply prompt IDs, outbound transactions, action locks, user-confirmed learned analysis rules and their audit events, schema migrations, and durable jobs. Navigating a different card cannot clear another mail's draft or AI question.
 
 The container is read-only except for `/data` and `/tmp`, drops Linux capabilities, binds health only to loopback on the host, and uses a named volume for portability across Linux, macOS, and Windows Docker hosts.
 
@@ -23,7 +23,10 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - A persisted pending item without a Telegram message is republished from SQLite, so an interrupted Bot API delivery does not require downloading MIME again.
 - IMAP disconnects make the health endpoint return `503`; a supervisor reconnects with capped exponential backoff and immediately reconciles after recovery.
 - ImapFlow Auto-IDLE remains enabled by default. Per-account health distinguishes an active IDLE session, the short connected period before Auto-IDLE starts, a server without IDLE using ImapFlow's polling fallback, and reconnecting/unavailable transport. The application does not run a competing manual `idle()` loop.
-- Telegram update offsets are persisted after each handled update.
+- Text and Voice updates are deduplicated and persisted in a durable command queue before their Telegram offset advances. A leased command is retried after a crash or transient failure and becomes terminal after bounded attempts.
+- Callback offsets advance only after successful handling. A failed callback is fetched again instead of being silently skipped.
+- Every primary card has a `(chat_id,message_id)` reference to an immutable set of mail row IDs. Card rotation deactivates but retains the old reference, so a delayed Reply cannot be rebound to a newer email. Migration backfill registers existing cards without republishing them.
+- Free text sent as a direct Reply to a known card enters a bounded intent router. Ask, Reply, Reply All, Forward, Cancel, and confirmation-gated Archive reuse existing mail-scoped operations; unknown text is treated as a question, never an arbitrary tool call.
 - An expired callback acknowledgement after restart is ignored so the replayed idempotent action can still finish before its offset is persisted.
 - Long-running per-mail actions edit the primary card immediately, use an atomic lock, and retain a short cooldown after completion so queued duplicate callbacks cannot repeat uploads or AI work.
 - Reconciliation is deferred while IMAP is unavailable; the reconnect supervisor performs the retry after restoring the mailbox session.
