@@ -1,5 +1,5 @@
 import { backup, DatabaseSync } from "node:sqlite";
-import type { Analysis, IncomingMail, LearnedRule, LearnedRuleEffect, LearnedRuleScope, MailTask, MemoryRecord, StoredMail } from "./domain/types.js";
+import type { Analysis, AutomationDecision, AutomationPolicy, IncomingMail, LearnedRule, LearnedRuleEffect, LearnedRuleScope, MailTask, MemoryRecord, StoredMail } from "./domain/types.js";
 import { deriveThreadKey } from "./mail/thread.js";
 
 interface MailRow {
@@ -316,6 +316,33 @@ export class Store {
       );
       CREATE INDEX mail_tasks_due_idx ON mail_tasks(reminder_state,due_at,available_at);
       CREATE INDEX mail_tasks_state_idx ON mail_tasks(state,account_id);
+    `);
+    this.applyMigration(10, `
+      CREATE TABLE automation_policies (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL CHECK(category IN ('informational','newsletter','marketing')),
+        action TEXT NOT NULL CHECK(action='archive'),
+        scope TEXT NOT NULL CHECK(scope IN ('global','account')),
+        account_id TEXT NOT NULL DEFAULT '',
+        exceptions_json TEXT NOT NULL DEFAULT '[]',
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','paused')),
+        source TEXT NOT NULL CHECK(source='user'),
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE automation_decisions (
+        id INTEGER PRIMARY KEY,
+        mail_id INTEGER NOT NULL REFERENCES mails(id) ON DELETE CASCADE,
+        policy_id INTEGER NOT NULL REFERENCES automation_policies(id) ON DELETE CASCADE,
+        outcome TEXT NOT NULL CHECK(outcome IN ('would_archive','executed','skipped','failed')),
+        reason TEXT NOT NULL,
+        details_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(mail_id,policy_id)
+      );
+      CREATE INDEX automation_policies_match_idx ON automation_policies(status,scope,account_id,category);
+      CREATE INDEX automation_decisions_mail_idx ON automation_decisions(mail_id,id);
     `);
     for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
       const mail = JSON.parse(row.payload_json) as IncomingMail;
@@ -807,6 +834,59 @@ export class Store {
       mailIds: JSON.parse(row.mail_ids_json) as number[], ...(row.due_at ? { dueAt: row.due_at } : {}),
       timezone: row.timezone, reminderState: row.reminder_state, attempts: row.attempts, dedupeKey: row.dedupe_key,
       ...(row.telegram_message_id ? { telegramMessageId: row.telegram_message_id } : {}) };
+  }
+
+  saveAutomationPolicy(input: Omit<AutomationPolicy, "id" | "status">): AutomationPolicy {
+    if (input.scope === "account" && !input.accountId) throw new Error("Account-scoped automation requires accountId");
+    const result = this.db.prepare(`INSERT INTO automation_policies(name,category,action,scope,account_id,exceptions_json,source)
+      VALUES(?,?,?,?,?,?,?)`).run(input.name, input.category, input.action, input.scope,
+        input.scope === "account" ? input.accountId ?? "" : "", JSON.stringify(input.exceptions), input.source);
+    return this.getAutomationPolicy(Number(result.lastInsertRowid))!;
+  }
+
+  getAutomationPolicy(id: number): AutomationPolicy | undefined {
+    const row = this.db.prepare("SELECT * FROM automation_policies WHERE id=?").get(id) as any;
+    return row ? this.rowToAutomationPolicy(row) : undefined;
+  }
+
+  listAutomationPolicies(activeOnly = true): AutomationPolicy[] {
+    return (this.db.prepare(`SELECT * FROM automation_policies ${activeOnly ? "WHERE status='active'" : ""} ORDER BY id DESC`).all() as unknown as any[])
+      .map((row) => this.rowToAutomationPolicy(row));
+  }
+
+  setAutomationPolicyStatus(id: number, status: AutomationPolicy["status"]): AutomationPolicy | undefined {
+    this.db.prepare("UPDATE automation_policies SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(status, id);
+    return this.getAutomationPolicy(id);
+  }
+
+  saveAutomationDecision(input: Omit<AutomationDecision, "id">, details: Record<string, unknown> = {}): AutomationDecision {
+    this.db.prepare(`INSERT INTO automation_decisions(mail_id,policy_id,outcome,reason,details_json) VALUES(?,?,?,?,?)
+      ON CONFLICT(mail_id,policy_id) DO UPDATE SET outcome=excluded.outcome,reason=excluded.reason,details_json=excluded.details_json`)
+      .run(input.mailId, input.policyId, input.outcome, input.reason, JSON.stringify(details));
+    const row = this.db.prepare("SELECT id,mail_id,policy_id,outcome,reason FROM automation_decisions WHERE mail_id=? AND policy_id=?")
+      .get(input.mailId, input.policyId) as any;
+    return { id: row.id, mailId: row.mail_id, policyId: row.policy_id, outcome: row.outcome, reason: row.reason };
+  }
+
+  latestAutomationDecision(mailId: number): AutomationDecision | undefined {
+    const row = this.db.prepare("SELECT id,mail_id,policy_id,outcome,reason FROM automation_decisions WHERE mail_id=? ORDER BY id DESC LIMIT 1").get(mailId) as any;
+    return row ? { id: row.id, mailId: row.mail_id, policyId: row.policy_id, outcome: row.outcome, reason: row.reason } : undefined;
+  }
+
+  setAutomationCategoryStatus(category: AutomationPolicy["category"], scope: AutomationPolicy["scope"], accountId: string | undefined, status: AutomationPolicy["status"]): number {
+    return Number(this.db.prepare(`UPDATE automation_policies SET status=?,updated_at=CURRENT_TIMESTAMP
+      WHERE category=? AND scope=? AND account_id=?`).run(status, category, scope, scope === "account" ? accountId ?? "" : "").changes);
+  }
+
+  mailCreatedAt(id: number): number | undefined {
+    const row = this.db.prepare("SELECT created_at FROM mails WHERE id=?").get(id) as { created_at: string } | undefined;
+    return row ? Date.parse(`${row.created_at.replace(" ", "T")}Z`) : undefined;
+  }
+
+  private rowToAutomationPolicy(row: any): AutomationPolicy {
+    return { id: row.id, name: row.name, category: row.category, action: row.action, scope: row.scope,
+      exceptions: JSON.parse(row.exceptions_json) as string[], status: row.status, source: row.source,
+      ...(row.account_id ? { accountId: row.account_id } : {}) };
   }
 
   setState(id: number, state: StoredMail["state"], error?: string): void {

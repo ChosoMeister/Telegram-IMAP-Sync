@@ -43,6 +43,15 @@ For a new additional account, validate its folders and SMTP in a one-off dry-run
 
 `/tasks` lists open and waiting mail tasks. A conversational request can create a task with or without a reminder; reminder time is rendered in `USER_TIMEZONE`. The task remains open after delivery and after its source email is archived or replied to. Telegram delivery has its own leased state and bounded retry; only a successful Bot API response marks it delivered. Use the task buttons to mark it done or cancel it.
 
+`/automations` lists explicit user-created automation policies and allows each one to be paused or resumed. Start with `AUTOMATION_MODE=observe`, recreate the container, and inspect recorded reasons before considering execution. Observation never moves mail. `execute` is a separate mode with its own activation watermark, so messages that predate execution—including mail seen during observation—are not retroactively archived. If `APP_MODE` is not `live`, configured execution automatically degrades to observation. Even in effective execute mode, exceptions and high/critical messages remain pending. Policy creation or disabling requires an explicit conversational request such as «خبرنامه‌ها را خودکار آرشیو کن؛ انقضا استثناست»; AI inference alone cannot grant permission.
+
+Safe activation sequence:
+
+1. Keep `APP_MODE=live` only after normal archive commissioning is complete; set `AUTOMATION_MODE=observe` and recreate the container.
+2. Create one narrow account-scoped policy, then review `/automations`, health status, and decision explanations on new controlled mail.
+3. Back up SQLite. If observation is correct, set `AUTOMATION_MODE=execute` and recreate the container. Do not edit the SQLite activation watermark.
+4. Send a new controlled matching email and verify Exchange Archive, Telegram cleanup, and the stored explanation. Pause the policy immediately from `/automations` if classification is not conservative.
+
 Useful commands:
 
 ```sh
@@ -121,6 +130,7 @@ For rollback, check out a known commit/tag, rebuild, and start without deleting 
 - **Thread has unrelated messages:** version 0.4.0 never merges by subject. Retain sanitized `Message-ID`, `In-Reply-To`, and `References` headers for diagnosis; malformed or reused sender IDs cannot be repaired safely by subject guessing.
 - **Wrong خانم/آقای in an AI draft:** unknown recipients must be neutral. For a verified person only, copy `config/honorifics.example.json` to ignored `config/honorifics.json`, use the lowercase email as key, and restart. Never commit the real directory.
 - **Bot ignores typed instructions:** free-form input must be sent using Telegram Reply to either the exact mail card or the prompt produced for that mail. Direct card replies support Ask, Reply, Reply All, Forward, Cancel, and exact-snapshot Archive. A clear Archive sentence is authorization for that selected target; ambiguous or conflicting requests receive one clarification question. Unbound text is still deliberately ignored when several mails could be selected.
+- **Automation did not archive a matching mail:** verify `AUTOMATION_MODE=execute`, the policy is active and scoped to the receiving account, and the mail arrived after execute mode activation. Exceptions, high/critical importance, self/shared action ownership, and non-informational analysis deliberately prevent execution. Use the natural-language «چرا خودکار نشد؟» action on the card or inspect `/automations`; do not remove safety gates by editing SQLite.
 - **Ask AI reports unsupported attachment:** current extraction supports PDF, DOCX, XLSX, HTML, and text/CSV-like formats. Images require OCR; legacy DOC/XLS require a future isolated converter.
 - **AI feels stuck:** the primary Telegram card changes immediately to a progress state. Each provider is limited by `AI_TIMEOUT_MS` (45 seconds by default) before fallback; structured logs include the nested network code and cause.
 - **Brief IMAP warning followed by restored:** Exchange or the network closed the long-lived session. Reconciliation waits for the reconnect supervisor and retries automatically; investigate only when health remains `503` or reconnect does not follow.

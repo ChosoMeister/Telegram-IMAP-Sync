@@ -24,6 +24,7 @@ import { effectLabel, LearnedRuleService, type FeedbackChoice, type RuleProposal
 import { planConversation } from "./conversation/planner.js";
 import type { ConversationPlan, ConversationPlanAction } from "./conversation/plan.js";
 import { MemoryService } from "./memory.js";
+import { AutomationService } from "./automation.js";
 import { createHash } from "node:crypto";
 
 export class MailBotApp {
@@ -41,6 +42,7 @@ export class MailBotApp {
   private readonly jobs: DurableJobWorker;
   private readonly learnedRules: LearnedRuleService;
   private readonly memory: MemoryService;
+  private readonly automation: AutomationService;
   constructor(
     private config: MailAccountAppConfig, private store: Store, private imap: ImapService,
     private smtp: SmtpService, private telegram: TelegramApi, private ai: AiService, private logger: Logger,
@@ -51,17 +53,24 @@ export class MailBotApp {
     this.scheduler = new SafeScheduler(logger);
     this.learnedRules = new LearnedRuleService(store);
     this.memory = new MemoryService(store);
+    this.automation = new AutomationService(store, this.effectiveAutomationMode(), (mail) => this.archiveConversationTarget(mail, [mail.id]));
     this.jobs = new DurableJobWorker(store, async (mail) => {
       const guidance = [this.learnedRules.trustedGuidance(mail), this.memory.trustedGuidance(mail)].filter(Boolean).join("\n");
       const analysis = await ai.analyze(mail, guidance || undefined);
       return analysis ? this.learnedRules.applyMatching(mail, analysis) : undefined;
     }, telegram, logger, async (mailId) => {
+      const analyzed = this.store.getMail(mailId);
+      const activatedAt = Number(this.store.getKv(this.automationActivationKey()) ?? 0);
+      if (analyzed) await this.automation.evaluate(analyzed, Boolean(activatedAt && (this.store.mailCreatedAt(mailId) ?? 0) >= activatedAt));
       const representative = this.store.threadRepresentative(mailId);
       if (representative) await this.enrichTelegram(representative);
     });
   }
 
   async start(): Promise<void> {
+    if (this.config.AUTOMATION_MODE !== "off" && !this.store.getKv(this.automationActivationKey())) {
+      this.store.setKv(this.automationActivationKey(), String(Date.now()));
+    }
     const backfilledReferences = this.store.backfillTelegramCardReferences(this.config.TELEGRAM_USER_ID);
     if (backfilledReferences) this.logger.info("Existing Telegram card references backfilled", { count: backfilledReferences });
     for (const account of this.accounts) {
@@ -79,6 +88,7 @@ export class MailBotApp {
       { command: "backup", description: "وضعیت نسخه پشتیبان" },
       { command: "rules", description: "مدیریت قواعد یادگرفته‌شده" },
       { command: "memory", description: "حافظه تأییدشده دستیار" },
+      { command: "automations", description: "قواعد خودکارسازی و حالت اجرا" },
       { command: "tasks", description: "کارها و یادآوری‌های باز" },
       { command: "diagnose", description: "گزارش کامل سلامت" },
       { command: "chatid", description: "نمایش شناسه چت برای Backup" }
@@ -122,6 +132,7 @@ export class MailBotApp {
       jobs: this.store.jobCounts(), ai: this.ai.status(), stt: this.stt?.status() ?? { enabled: false }, smtp: this.smtp.status(), telegram: this.telegram.status(),
       learnedRules: { total: learnedRules.length, enabled: learnedRules.filter((rule) => rule.enabled).length },
       memory: { active: this.memory.list().length, confirmed: this.memory.list().filter((item) => item.confidence === "confirmed").length },
+      automation: { mode: this.config.AUTOMATION_MODE, effectiveMode: this.effectiveAutomationMode(), policies: this.store.listAutomationPolicies(true).length },
       backup: {
         lastSuccess: this.store.getKv("backup:last-success"), lastError: this.store.getKv("backup:last-error"),
         telegramLastSuccess: this.store.getKv("backup:telegram-last-success"), telegramLastError: this.store.getKv("backup:telegram-last-error")
@@ -380,6 +391,13 @@ export class MailBotApp {
     if (taskMatch && messageId) {
       this.store.setMailTaskState(Number(taskMatch[1]), taskMatch[2] === "done" ? "done" : "cancelled");
       const rendered = this.renderTasksCommand();
+      await this.telegram.editMessage(messageId, rendered.text, rendered.buttons);
+    }
+    const automationMatch = /^sys:auto:(\d+):toggle$/.exec(data);
+    if (automationMatch && messageId) {
+      const policy = this.store.getAutomationPolicy(Number(automationMatch[1]));
+      if (policy) this.store.setAutomationPolicyStatus(policy.id, policy.status === "active" ? "paused" : "active");
+      const rendered = this.renderAutomationsCommand();
       await this.telegram.editMessage(messageId, rendered.text, rendered.buttons);
     }
   }
@@ -893,6 +911,11 @@ export class MailBotApp {
       await this.sendCommandResult(message, rendered.text, rendered.buttons);
       return;
     }
+    if (command === "/automations") {
+      const rendered = this.renderAutomationsCommand();
+      await this.sendCommandResult(message, rendered.text, rendered.buttons);
+      return;
+    }
     if (command === "/diagnose") {
       const status = this.status();
       await this.sendCommandResult(message, [
@@ -1124,6 +1147,31 @@ export class MailBotApp {
           { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
         ]]);
         return;
+      } else if (action.kind === "set_automation") {
+        const request = this.store.getConversationPlan(planId)?.requestText ?? "";
+        if (!/(خودکار|خودت|دیگه ازم نپرس|متوقف|توقف|غیرفعال)/u.test(request)) {
+          this.store.appendConversationToolResult(planId, actionIndex, action.kind, "skipped", { reason: "explicit_permission_required" });
+          await this.editPrimary(mail, "برای تغییر خودکارسازی باید صریحاً بگویید چه دسته‌ای فعال یا متوقف شود.", [[
+            { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
+          ]]);
+          return;
+        }
+        const accountId = action.scope === "account" ? mail.accountId ?? this.primaryAccountId : undefined;
+        if (action.enabled) this.store.saveAutomationPolicy({ name: `${action.category} — ${action.scope}`, category: action.category,
+          action: "archive", scope: action.scope, ...(accountId ? { accountId } : {}), exceptions: action.exceptions, source: "user" });
+        else this.store.setAutomationCategoryStatus(action.category, action.scope, accountId, "paused");
+        this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete", { enabled: action.enabled, mode: this.config.AUTOMATION_MODE });
+        await this.editPrimary(mail, `${action.enabled ? "✅ قانون خودکارسازی ثبت شد" : "⏸ خودکارسازی متوقف شد"}. حالت مؤثر سرویس: ${esc(this.effectiveAutomationMode())}`, [[
+          { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
+        ]]);
+        return;
+      } else if (action.kind === "explain_decision") {
+        const decision = this.store.latestAutomationDecision(mail.id);
+        await this.editPrimary(mail, decision ? `چرا؟ ${esc(decision.reason)}` : "برای این ایمیل تصمیم خودکارسازی ثبت نشده است.", [[
+          { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
+        ]]);
+        this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete", { decisionId: decision?.id ?? null });
+        return;
       }
       this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete");
     } catch (error) {
@@ -1221,6 +1269,21 @@ export class MailBotApp {
 
   private formatTaskTime(timestamp: number): string {
     return new Intl.DateTimeFormat("fa-IR", { dateStyle: "medium", timeStyle: "short", timeZone: this.config.USER_TIMEZONE }).format(new Date(timestamp));
+  }
+
+  private renderAutomationsCommand(): { text: string; buttons: Array<Array<{ text: string; callback_data: string }>> } {
+    const policies = this.store.listAutomationPolicies(false);
+    return {
+      text: [`<b>خودکارسازی — ${esc(this.effectiveAutomationMode())}</b>${this.config.AUTOMATION_MODE === "execute" && this.config.APP_MODE !== "live" ? "\nAPP_MODE آزمایشی است؛ اجرا به مشاهده تنزل یافته است." : ""}`, ...(policies.length ? policies.map((policy) =>
+        `${policy.status === "active" ? "✅" : "⏸"} #${policy.id} ${esc(policy.name)}${policy.exceptions.length ? `\nاستثنا: ${esc(policy.exceptions.join("، "))}` : ""}`
+      ) : ["هیچ قانونی ثبت نشده است."])].join("\n\n"),
+      buttons: policies.slice(0, 10).map((policy) => [{ text: `${policy.status === "active" ? "⏸" : "▶️"} #${policy.id}`, callback_data: `sys:auto:${policy.id}:toggle` }])
+    };
+  }
+
+  private automationActivationKey(): string { return `automation:${this.effectiveAutomationMode()}:activated-at`; }
+  private effectiveAutomationMode(): "off" | "observe" | "execute" {
+    return this.config.AUTOMATION_MODE === "execute" && this.config.APP_MODE !== "live" ? "observe" : this.config.AUTOMATION_MODE;
   }
 
   private renderImapMode(status?: { connectionState?: string; notificationMode?: string }): string {

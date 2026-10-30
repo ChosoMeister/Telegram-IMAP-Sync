@@ -17,6 +17,7 @@ const schema = z.object({
   HONORIFICS_PATH: z.string().optional(),
   USER_PROFILE_PATH: z.string().optional(),
   USER_TIMEZONE: z.string().default("Asia/Tehran"),
+  AUTOMATION_MODE: z.enum(["off", "observe", "execute"]).default("off"),
   MAIL_ACCOUNT_FILES: z.string().optional(),
   HEALTH_PORT: z.coerce.number().int().min(1).max(65535).default(8080),
 

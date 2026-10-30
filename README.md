@@ -13,6 +13,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Structured global/account memory with explicit source and confidence, superseding corrections, `/memory` controls, and confirmed-only analysis guidance
 - Independent importance and action ownership: a critical FYI stays critical and keeps its risk even when no direct user action is required
 - Independent open/waiting mail tasks with timezone-aware durable reminders, restart recovery, delivery tracking, deduplication, and `/tasks` controls
+- Explicit opt-in informational/newsletter/marketing automation with global/account scope, keyword exceptions, observation-only evidence, per-mail Persian explanations, and `/automations` pause/resume controls
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
 - Grounded Persian action packets with priority, summary, owner-aware action, deadline, amounts, key facts, risk, and source-email action links
@@ -47,7 +48,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Telegram rate-limit/transient-failure backoff without unsafe message-send retries
 - SQLite recovery state, IMAP-aware health endpoint, structured redacted logs
 - Online SQLite backups with configurable retention and optional gzip delivery to a dedicated private Telegram channel/group
-- Dismissible `/status`, `/sync`, `/accounts`, `/failed`, `/backup`, `/rules`, `/diagnose`, and `/chatid` operational commands
+- Dismissible `/status`, `/sync`, `/accounts`, `/failed`, `/backup`, `/rules`, `/memory`, `/tasks`, `/automations`, `/diagnose`, and `/chatid` operational commands
 - Overlap-safe periodic tasks plus Docker CPU, memory, and PID limits
 - Component health for AI, SMTP, Telegram, backup, queue, and IMAP plus completed-state retention
 - Multi-architecture Docker design for Linux, macOS, and Windows hosts

@@ -16,6 +16,10 @@ const actionSchema = z.discriminatedUnion("kind", [
     needsReminder: z.boolean().default(false) }).superRefine((action, context) => {
       if (action.needsReminder && !action.dueAt) context.addIssue({ code: "custom", path: ["dueAt"], message: "Reminder requires dueAt" });
     }),
+  z.object({ kind: z.literal("set_automation"), target: targetSchema,
+    category: z.enum(["informational", "newsletter", "marketing"]), scope: z.enum(["global", "account"]),
+    exceptions: z.array(z.string().trim().min(1).max(100)).max(10).default([]), enabled: z.boolean() }),
+  z.object({ kind: z.literal("explain_decision"), target: targetSchema }),
   z.object({ kind: z.literal("cancel"), target: targetSchema })
 ]);
 

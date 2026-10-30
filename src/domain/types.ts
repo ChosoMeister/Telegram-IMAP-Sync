@@ -132,6 +132,26 @@ export interface MailTask {
   telegramMessageId?: number;
 }
 
+export interface AutomationPolicy {
+  id: number;
+  name: string;
+  category: "informational" | "newsletter" | "marketing";
+  action: "archive";
+  scope: "global" | "account";
+  accountId?: string;
+  exceptions: string[];
+  status: "active" | "paused";
+  source: "user";
+}
+
+export interface AutomationDecision {
+  id: number;
+  mailId: number;
+  policyId: number;
+  outcome: "would_archive" | "executed" | "skipped" | "failed";
+  reason: string;
+}
+
 export interface StoredMail extends IncomingMail {
   id: number;
   state: MailState;

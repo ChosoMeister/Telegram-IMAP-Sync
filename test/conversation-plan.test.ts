@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseConversationPlan } from "../src/conversation/plan.js";
+import { planConversation } from "../src/conversation/planner.js";
 
 describe("validated conversation plans", () => {
   it("accepts a bounded multi-step plan without internal mail identifiers", () => {
@@ -30,5 +31,15 @@ describe("validated conversation plans", () => {
       dueAt: "2026-11-01T10:00:00+03:30", needsReminder: true
     }] });
     expect(plan.actions[0]).toMatchObject({ kind: "create_task", needsReminder: true });
+  });
+  it("accepts only bounded user automation policies and explanations", () => {
+    const policy = parseConversationPlan({ summaryFa: "خودکارسازی خبرنامه", needsClarification: false, actions: [{
+      kind: "set_automation", target: "this_mail", category: "newsletter", scope: "account",
+      exceptions: ["انقضا"], enabled: true
+    }] });
+    expect(policy.actions[0]).toMatchObject({ kind: "set_automation", category: "newsletter", exceptions: ["انقضا"] });
+    expect(parseConversationPlan({ summaryFa: "توضیح تصمیم", needsClarification: false,
+      actions: [{ kind: "explain_decision", target: "this_mail" }] }).actions[0]).toMatchObject({ kind: "explain_decision" });
+    expect(planConversation("خبرنامه‌ها رو خودکار آرشیو کن")).toMatchObject({ kind: "ask" });
   });
 });

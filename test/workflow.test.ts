@@ -4,8 +4,9 @@ import { Store } from "../src/store.js";
 import { Logger } from "../src/logger.js";
 import { config, incoming } from "./helpers.js";
 
-function setup(archive = vi.fn().mockResolvedValue(undefined), appMode: "dry-run" | "live" = "dry-run") {
-  const isolatedConfig = { ...config, APP_MODE: appMode, aiProviderOrder: [...config.aiProviderOrder], sttModelOrder: [...config.sttModelOrder] };
+function setup(archive = vi.fn().mockResolvedValue(undefined), appMode: "dry-run" | "live" = "dry-run", automationMode: "off" | "observe" | "execute" = "off") {
+  const isolatedConfig = { ...config, APP_MODE: appMode, AUTOMATION_MODE: automationMode,
+    aiProviderOrder: [...config.aiProviderOrder], sttModelOrder: [...config.sttModelOrder] };
   const store = new Store(":memory:");
   const { id } = store.upsertMail(incoming);
   store.setTelegramMessages(id, [100, 101]);
@@ -27,6 +28,9 @@ function setup(archive = vi.fn().mockResolvedValue(undefined), appMode: "dry-run
     analyze: vi.fn().mockResolvedValue(undefined), ask: vi.fn().mockResolvedValue("پاسخ آزمایشی"),
     planConversationRequest: vi.fn(async (_mail: any, request: string) => {
       if (request.includes("مبهم") && !request.includes("توضیح کاربر")) return { summaryFa: "ابهام", needsClarification: true, clarificationQuestion: "منظورتان پاسخ است یا آرشیو؟", actions: [] };
+      if (request.includes("خبرنامه") && request.includes("خودکار")) return { summaryFa: "ثبت خودکارسازی", needsClarification: false, actions: [{
+        kind: "set_automation", target: "this_mail", category: "newsletter", scope: "account", exceptions: ["انقضا"], enabled: true }] };
+      if (request.includes("چرا خودکار")) return { summaryFa: "توضیح تصمیم", needsClarification: false, actions: [{ kind: "explain_decision", target: "this_mail" }] };
       if (request.includes("آرشیو")) return { summaryFa: "آرشیو", needsClarification: false, actions: [{ kind: "archive", target: "this_mail" }] };
       if (request.includes("بهش بگو")) return { summaryFa: "پیش‌نویس", needsClarification: false, actions: [{ kind: "draft_reply", target: "this_mail", instruction: request, tone: "formal", replyAll: false }] };
       if (request.includes("یادت باشه")) return { summaryFa: "ثبت حافظه", needsClarification: false, actions: [{ kind: "remember", target: "this_mail", memoryKind: "role", key: "finance_role", statement: "در مکاتبات مالی فقط ناظر هستم", scope: "account" }] };
@@ -130,6 +134,32 @@ describe("Done transaction", () => {
     expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining("پاسخ رسمی باشد"), expect.any(Array), true);
     await (s.app as any).handleSystemCallback("toggle-memory", `sys:memory:${memory.id}:toggle`, 200);
     expect(s.store.getMemory(memory.id)?.status).toBe("disabled");
+    s.store.close();
+  });
+  it("records an explicit bounded automation policy and manages it through /automations", async () => {
+    const s = setup();
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    await (s.app as any).handleText({ message_id: 911, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 100 }, text: "خبرنامه‌ها رو خودکار آرشیو کن؛ انقضا استثناست" });
+    expect(s.store.listAutomationPolicies()).toEqual([expect.objectContaining({ category: "newsletter", scope: "account",
+      accountId: "primary", exceptions: ["انقضا"], status: "active" })]);
+    await (s.app as any).handleText({ message_id: 912, chat: { id: 42 }, from: { id: 42 }, text: "/automations" });
+    expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining("خودکارسازی — off"), expect.any(Array), true);
+    const policy = s.store.listAutomationPolicies()[0]!;
+    await (s.app as any).handleSystemCallback("toggle-auto", `sys:auto:${policy.id}:toggle`, 200);
+    expect(s.store.getAutomationPolicy(policy.id)?.status).toBe("paused");
+    s.store.close();
+  });
+  it("downgrades execute automation to observation while APP_MODE is dry-run", async () => {
+    const archive = vi.fn().mockResolvedValue(undefined);
+    const s = setup(archive, "dry-run", "execute");
+    s.store.setAnalysis(s.id, { importance: "low", score: 15, summaryFa: "خبرنامه", suggestedAction: "اقدامی نیست",
+      reason: "اطلاع‌رسانی", provider: "test", actionOwner: "other", category: "informational" });
+    s.store.saveAutomationPolicy({ name: "اطلاع‌رسانی‌ها", category: "informational", action: "archive", scope: "global", exceptions: [], source: "user" });
+    const decision = await (s.app as any).automation.evaluate(s.store.getMail(s.id), true);
+    expect(decision).toMatchObject({ outcome: "would_archive" });
+    expect(archive).not.toHaveBeenCalled();
+    expect((s.app.status().automation as any).effectiveMode).toBe("observe");
     s.store.close();
   });
   it("creates a mail task, delivers an overdue reminder once, and keeps the task open", async () => {

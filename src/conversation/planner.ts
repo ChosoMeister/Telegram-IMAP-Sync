@@ -11,6 +11,11 @@ const normalize = (text: string): string => text.trim().replace(/ي/g, "ی").rep
 export function planConversation(text: string): ConversationIntent {
   const value = normalize(text);
   if (/^(لغو|کنسل|بی ?خیال|برگرد)$/.test(value)) return { kind: "cancel" };
+  // Policy requests may contain an archive verb but must go through the validated AI plan;
+  // they are not authorization to archive the currently referenced message.
+  if (/(خودکار|دیگه ازم نپرس|همیشه).*(خبرنامه|اطلاع(?:یه|رسانی)|تبلیغ)|(خبرنامه|اطلاع(?:یه|رسانی)|تبلیغ).*(خودکار|دیگه ازم نپرس|همیشه)/u.test(value)) {
+    return { kind: "ask", question: value };
+  }
   if (/(انجام شد|آرشیو(?:ش)? کن|از اینباکس (?:بردار|خارج کن))/.test(value)) return { kind: "archive" };
   if (/(پاسخ به همه|ریپلای آل|reply all)/i.test(value)) return { kind: "reply", replyAll: true };
   if (/(پاسخ بده|جواب بده|ریپلای کن|reply کن)/i.test(value)) return { kind: "reply", replyAll: false };

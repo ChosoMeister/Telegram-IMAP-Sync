@@ -15,6 +15,7 @@
 - Add sourced global/account assistant memories with confirmed/inferred confidence, superseding corrections, trusted analysis guidance, and `/memory` controls.
 - Decouple informational/action-ownership feedback from importance, score, risk, and notification urgency so critical FYI alerts remain critical.
 - Add independent mail tasks and leased timezone-aware reminders with deduplication, restart recovery, separate delivery state, and `/tasks` completion/cancellation controls.
+- Add explicit bounded archive policies for informational/newsletter/marketing mail, account/global scope, exceptions, observation-only decisions, mode-specific activation watermarks, Persian explanations, and `/automations` controls; execution remains disabled by default.
 
 ## Unreleased
 
