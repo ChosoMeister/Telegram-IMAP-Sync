@@ -47,6 +47,8 @@ For a new additional account, validate its folders and SMTP in a one-off dry-run
 
 A standalone Persian request to archive all calendar invitations creates a confirmation preview instead of moving mail immediately. The preview stores the exact Pending calendar-mail IDs, shows counts per account, and can display up to 20 selected event titles. Confirmation groups that immutable snapshot by account and uses each account's own IMAP connection. New mail arriving after preview is excluded. A changed or invalid snapshot fails closed, while an account-specific transport failure is reported without hiding successful account groups.
 
+Direct text instructions sent as replies to a mail card are tracked as temporary Telegram conversation messages. The bot attempts to remove them as soon as the reviewed draft is ready. If Telegram deletion fails, their IDs remain attached to the mail so the durable cleanup after successful Reply, Forward, RSVP, or Archive retries them instead of silently losing the cleanup request.
+
 Safe activation sequence:
 
 1. Keep `APP_MODE=live` only after normal archive commissioning is complete; set `AUTOMATION_MODE=observe` and recreate the container.

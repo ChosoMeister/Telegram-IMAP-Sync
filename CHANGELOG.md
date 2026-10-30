@@ -4,6 +4,7 @@
 
 - Reduce durable-job scheduler pressure and rate-limit repeated overlap warnings while preserving overlap protection.
 - Add confirmed multi-account bulk archiving for standalone Persian requests targeting all Pending calendar invitations, using immutable previews and per-account execution results.
+- Track direct conversational instruction messages in durable Telegram cleanup so successful Reply/Forward flows remove their temporary history; failed immediate deletion remains queued for final cleanup.
 
 ## Unreleased
 

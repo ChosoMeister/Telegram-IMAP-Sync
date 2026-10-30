@@ -1093,6 +1093,8 @@ export class MailBotApp {
   }
 
   private async planAndExecuteCardRequest(message: TelegramMessage, mail: StoredMail, scopeMailIds: number[], request = message.text ?? ""): Promise<void> {
+    const tracked = this.store.getMail(mail.id) ?? mail;
+    this.store.setTelegramMessages(mail.id, [...new Set([...tracked.telegramMessageIds, message.message_id])], tracked.telegramCreatedAt);
     let plan: ConversationPlan;
     try { plan = await this.ai.planConversationRequest(mail, request, scopeMailIds.length); }
     catch { plan = this.fallbackConversationPlan(request); }
@@ -1112,12 +1114,14 @@ export class MailBotApp {
       this.store.setConversationPrompt(this.config.TELEGRAM_USER_ID, mail.id, prompt.message_id);
       this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
       this.store.registerTelegramMessage({ chatId: prompt.chat.id, messageId: prompt.message_id, mailId: mail.id, role: "prompt", scopeMailIds });
+      await this.cleanupConversationMessages(this.store.getMail(mail.id)!, message.message_id);
       return;
     }
     this.store.finishConversationPlan(planId, "running");
     try {
       for (const [index, action] of plan.actions.entries()) await this.executeConversationAction(planId, index, action, mail, scopeMailIds);
       this.store.finishConversationPlan(planId, "complete");
+      await this.cleanupConversationMessages(this.store.getMail(mail.id)!, message.message_id);
     } catch (error) {
       this.store.finishConversationPlan(planId, "failed", describeError(error));
       throw error;
@@ -1552,9 +1556,16 @@ export class MailBotApp {
   }
 
   private async cleanupConversationMessages(mail: StoredMail, incomingMessageId: number): Promise<void> {
-    const auxiliary = [...mail.telegramMessageIds.slice(1), incomingMessageId];
-    if (auxiliary.length) await this.telegram.deleteMessages(auxiliary).catch(() => false);
-    this.store.setTelegramMessages(mail.id, mail.telegramMessageIds.slice(0, 1), mail.telegramCreatedAt);
+    const current = this.store.getMail(mail.id) ?? mail;
+    const primary = current.telegramMessageIds.slice(0, 1);
+    const auxiliary = [...new Set([...current.telegramMessageIds.slice(1), incomingMessageId])];
+    if (!auxiliary.length) return;
+    let deleted = false;
+    try { deleted = await this.telegram.deleteMessages(auxiliary); }
+    catch (error) {
+      this.logger.warn("Conversation message cleanup deferred", { mailId: mail.id, messageCount: auxiliary.length, error: describeError(error) });
+    }
+    this.store.setTelegramMessages(mail.id, deleted ? primary : [...new Set([...primary, ...auxiliary])], current.telegramCreatedAt);
   }
 
   private async changeTone(mail: StoredMail, tone: "formal" | "short" | "friendly"): Promise<void> {

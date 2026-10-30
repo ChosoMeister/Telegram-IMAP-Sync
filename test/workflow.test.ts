@@ -157,6 +157,17 @@ describe("Done transaction", () => {
     expect(s.ai.draftReply).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "بهش بگو نسخه اصلاح‌شده رو بفرسته", "formal", false, expect.any(Array));
     expect(s.smtp.sendRaw).not.toHaveBeenCalled();
     expect(s.store.getConversation(42, s.id)).toMatchObject({ mode: "review", draft: "پیش‌نویس صوتی", metadata: { draftVersion: 1 } });
+    expect(s.telegram.deleteMessages).toHaveBeenCalledWith([101, 904]);
+    expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([100]);
+    s.store.close();
+  });
+  it("retains a direct instruction for durable final cleanup when immediate Telegram deletion fails", async () => {
+    const s = setup();
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    s.telegram.deleteMessages.mockRejectedValueOnce(new Error("Telegram unavailable"));
+    await (s.app as any).handleText({ message_id: 924, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 100 }, text: "بهش بگو نسخه اصلاح‌شده رو بفرسته" });
+    expect(s.store.getMail(s.id)?.telegramMessageIds).toEqual([100, 101, 924]);
     s.store.close();
   });
   it("rejects approval from an older draft after the text changes", async () => {
