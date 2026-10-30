@@ -345,7 +345,8 @@ export class MailBotApp {
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
     const userId = update.callback_query?.from.id ?? update.message?.from?.id;
     if (userId !== this.config.TELEGRAM_USER_ID) return;
-    if (update.callback_query?.data?.startsWith("sys:")) await this.handleSystemCallback(update.callback_query.id, update.callback_query.data, update.callback_query.message?.message_id);
+    if (update.callback_query?.data?.startsWith("sys:")) await this.handleSystemCallback(update.callback_query.id, update.callback_query.data,
+      update.callback_query.message?.message_id, update.callback_query.message?.chat.id);
     else if (update.callback_query?.data) await this.handleCallback(update.callback_query.id, update.callback_query.data);
     else if (update.message?.text || update.message?.voice) {
       this.store.enqueueTelegramCommand({ updateId: update.update_id, userId, chatId: update.message.chat.id,
@@ -373,9 +374,18 @@ export class MailBotApp {
     }
   }
 
-  private async handleSystemCallback(callbackId: string, data: string, messageId?: number): Promise<void> {
+  private async handleSystemCallback(callbackId: string, data: string, messageId?: number, chatId = this.config.TELEGRAM_USER_ID): Promise<void> {
     await this.answerCallback(callbackId);
     if (data === "sys:close" && messageId) await this.telegram.deleteMessages([messageId]).catch(() => false);
+    const bulkCalendarMatch = /^sys:bulkcal:(confirm|view|cancel)$/.exec(data);
+    if (bulkCalendarMatch && messageId) {
+      if (bulkCalendarMatch[1] === "cancel") {
+        this.store.deactivateTelegramMessage(chatId, messageId);
+        await this.telegram.deleteMessages([messageId]).catch(() => false);
+      } else if (bulkCalendarMatch[1] === "view") await this.showBulkCalendarSnapshot(chatId, messageId);
+      else await this.confirmBulkCalendarArchive(chatId, messageId);
+      return;
+    }
     const ruleMatch = /^sys:rule:(\d+):toggle$/.exec(data);
     if (ruleMatch && messageId) {
       this.learnedRules.toggle(Number(ruleMatch[1]));
@@ -1299,6 +1309,10 @@ export class MailBotApp {
 
   private async handleUnboundText(message: TelegramMessage): Promise<void> {
     const text = message.text!.trim();
+    if (this.isBulkCalendarArchiveRequest(text)) {
+      await this.previewBulkCalendarArchive(message);
+      return;
+    }
     const search = /^(?:جستجو|جست‌وجو|پیدا کن)\s+(.+)$/u.exec(text);
     let result: string;
     if (search) result = this.renderSearchResults(search[1]!);
@@ -1307,6 +1321,124 @@ export class MailBotApp {
     else if (/خودکارسازی|قواعد خودکار/u.test(text)) result = this.renderAutomationsCommand().text;
     else result = "پیام شما دریافت شد. برای اقدام یا سؤال درباره یک ایمیل، روی همان کارت Reply مستقیم بزنید. برای جست‌وجو بنویسید «جستجو عبارت»، و برای فهرست‌ها از /tasks، /memory یا /automations استفاده کنید.";
     await this.telegram.sendMessageTo(message.chat.id, result, [[{ text: "✖️ بستن", callback_data: "sys:close" }]], true);
+  }
+
+  private isBulkCalendarArchiveRequest(text: string): boolean {
+    const normalized = text.trim().replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/\s+/g, " ");
+    const archive = /(?:آرشیو|ارشیو|از اینباکس (?:بردار|خارج کن))/u.test(normalized);
+    const calendar = /(?:تقویم|تقویمی|کلندر|دعوت(?:‌| )?(?:نامه)?|[جح]لسه)/u.test(normalized);
+    const bulk = /(?:همه|تمام|کل|هرچی|هر چه)/u.test(normalized);
+    return archive && calendar && bulk;
+  }
+
+  private pendingCalendarMails(): StoredMail[] {
+    return this.store.listPending().filter((mail) => Boolean(mail.calendar));
+  }
+
+  private bulkCalendarButtons(): Array<Array<{ text: string; callback_data: string; style?: "danger" | "success" | "primary" }>> {
+    return [
+      [{ text: "✅ تأیید آرشیو", callback_data: "sys:bulkcal:confirm", style: "danger" }],
+      [{ text: "👁 مشاهده موارد", callback_data: "sys:bulkcal:view", style: "primary" },
+        { text: "❌ لغو", callback_data: "sys:bulkcal:cancel" }]
+    ];
+  }
+
+  private async previewBulkCalendarArchive(message: TelegramMessage): Promise<void> {
+    const mails = this.pendingCalendarMails();
+    if (!mails.length) {
+      await this.telegram.sendMessageTo(message.chat.id, "✅ ایمیل تقویمی Pending برای آرشیو پیدا نشد.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]], true);
+      return;
+    }
+    const accounts = new Map<string, { label: string; count: number }>();
+    for (const mail of mails) {
+      const id = mail.accountId ?? this.primaryAccountId;
+      const current = accounts.get(id);
+      accounts.set(id, { label: mail.accountLabel ?? id, count: (current?.count ?? 0) + 1 });
+    }
+    const text = [
+      `<b>پیش‌نمایش آرشیو گروهی</b>`,
+      `${this.faNumber(mails.length)} ایمیل تقویمی Pending پیدا شد:`,
+      ...[...accounts.values()].map((account) => `• ${esc(account.label)}: ${this.faNumber(account.count)}`),
+      "",
+      "فقط همین snapshot پس از تأیید آرشیو می‌شود؛ ایمیل‌های بعدی وارد عملیات نخواهند شد."
+    ].join("\n");
+    const sent = await this.telegram.sendMessageTo(message.chat.id, text, this.bulkCalendarButtons(), true);
+    this.store.registerTelegramMessage({ chatId: sent.chat.id, messageId: sent.message_id, mailId: mails[0]!.id,
+      role: "prompt", scopeMailIds: mails.map((mail) => mail.id) });
+  }
+
+  private async showBulkCalendarSnapshot(chatId: number, messageId: number): Promise<void> {
+    const reference = this.store.resolveTelegramMessage(chatId, messageId);
+    if (!reference?.active || reference.role !== "prompt") {
+      await this.telegram.editMessage(messageId, "این پیش‌نمایش دیگر معتبر نیست.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+      return;
+    }
+    const mails = reference.scopeMailIds.map((id) => this.store.getMail(id)).filter((mail): mail is StoredMail => Boolean(mail));
+    const items = mails.slice(0, 20).map((mail, index) =>
+      `${this.faNumber(index + 1)}. [${esc(mail.accountLabel ?? mail.accountId ?? this.primaryAccountId)}] ${esc(mail.calendar?.summary || mail.subject)}`);
+    const remaining = mails.length - items.length;
+    await this.telegram.editMessage(messageId, ["<b>دعوت‌ها و ایمیل‌های تقویمی انتخاب‌شده</b>", ...items,
+      ...(remaining > 0 ? [`… و ${this.faNumber(remaining)} مورد دیگر`] : [])].join("\n"), this.bulkCalendarButtons());
+  }
+
+  private async confirmBulkCalendarArchive(chatId: number, messageId: number): Promise<void> {
+    const reference = this.store.resolveTelegramMessage(chatId, messageId);
+    if (!reference?.active || reference.role !== "prompt") {
+      await this.telegram.editMessage(messageId, "این پیش‌نمایش منقضی یا قبلاً اجرا شده است.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+      return;
+    }
+    const resolved = reference.scopeMailIds.map((id) => this.store.getMail(id));
+    if (resolved.some((mail) => !mail || !mail.calendar)) {
+      this.store.deactivateTelegramMessage(chatId, messageId);
+      await this.telegram.editMessage(messageId, "❌ snapshot تغییر کرده یا بخشی از آن در دسترس نیست؛ برای امنیت هیچ ایمیلی آرشیو نشد.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+      return;
+    }
+    const actionable = resolved.filter((mail): mail is StoredMail => Boolean(mail && (mail.state === "pending" || mail.state === "failed")));
+    if (!actionable.length) {
+      this.store.deactivateTelegramMessage(chatId, messageId);
+      await this.telegram.editMessage(messageId, "✅ همه موارد این snapshot قبلاً از Inbox خارج شده‌اند.", [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+      return;
+    }
+    if (this.config.APP_MODE !== "live") {
+      await this.telegram.editMessage(messageId, "🧪 حالت آزمایشی فعال است؛ هیچ ایمیلی جابه‌جا نشد.", this.bulkCalendarButtons());
+      return;
+    }
+    this.store.deactivateTelegramMessage(chatId, messageId);
+    await this.telegram.editMessage(messageId, `⏳ در حال آرشیو ${this.faNumber(actionable.length)} ایمیل تقویمی…`, []);
+    const groups = new Map<string, StoredMail[]>();
+    for (const mail of actionable) {
+      const accountId = mail.accountId ?? this.primaryAccountId;
+      groups.set(accountId, [...(groups.get(accountId) ?? []), mail]);
+    }
+    let archived = 0;
+    const failures: string[] = [];
+    for (const mails of groups.values()) {
+      for (const mail of mails) this.store.setState(mail.id, "processing");
+      try {
+        await this.imapFor(mails[0]!).archiveMany(mails);
+        for (const mail of mails) {
+          this.store.setState(mail.id, "done");
+          this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
+          if (mail.telegramMessageIds.length) this.store.enqueueJob("telegram_cleanup", mail.id, { reason: "bulk_calendar_archive" });
+        }
+        archived += mails.length;
+      } catch (error) {
+        const reason = describeError(error);
+        for (const mail of mails) this.store.setState(mail.id, "failed", reason);
+        failures.push(`${mails[0]!.accountLabel ?? mails[0]!.accountId ?? this.primaryAccountId}: ${reason}`);
+      }
+    }
+    await this.processJobs();
+    await this.syncInbox(true);
+    this.logger.info("Bulk calendar snapshot archive completed", { requested: actionable.length, archived, failedAccounts: failures.length });
+    const result = failures.length
+      ? [`⚠️ ${this.faNumber(archived)} ایمیل آرشیو شد.`, "موارد ناموفق:", ...failures.map((failure) => `• ${esc(failure)}`)].join("\n")
+      : `✅ ${this.faNumber(archived)} ایمیل تقویمی آرشیو و کارت‌های مرتبط پاک شدند.`;
+    await this.telegram.editMessage(messageId, result, [[{ text: "✖️ بستن", callback_data: "sys:close" }]]);
+  }
+
+  private faNumber(value: number): string {
+    return new Intl.NumberFormat("fa-IR", { useGrouping: false }).format(value);
   }
 
   private renderSearchResults(query: string): string {

@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Reduce durable-job scheduler pressure and rate-limit repeated overlap warnings while preserving overlap protection.
+- Add confirmed multi-account bulk archiving for standalone Persian requests targeting all Pending calendar invitations, using immutable previews and per-account execution results.
 
 ## Unreleased
 

@@ -60,6 +60,37 @@ describe("Done transaction", () => {
     expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining("Reply مستقیم"), expect.any(Array), true);
     s.store.close();
   });
+  it("previews and confirms an immutable bulk archive of pending calendar mail", async () => {
+    const archive = vi.fn().mockResolvedValue(undefined);
+    const s = setup(archive, "live");
+    const first = s.store.upsertMail({ ...incoming, uid: 301, messageId: "<calendar-301@example.com>", subject: "جلسه اول",
+      calendar: { parserVersion: 1, method: "REQUEST", uid: "event-301", summary: "جلسه اول", attendees: [] } });
+    const second = s.store.upsertMail({ ...incoming, uid: 302, messageId: "<calendar-302@example.com>", subject: "جلسه دوم",
+      calendar: { parserVersion: 1, method: "REQUEST", uid: "event-302", summary: "جلسه دوم", attendees: [] } });
+
+    await (s.app as any).handleText({ message_id: 930, chat: { id: 42 }, from: { id: 42 },
+      text: "همه ایمیل های دعوت به حلسه و تقویمی رو ارشیو کن" });
+
+    expect(s.imap.archiveMany).not.toHaveBeenCalled();
+    expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining("۲ ایمیل تقویمی"), expect.arrayContaining([
+      expect.arrayContaining([expect.objectContaining({ callback_data: "sys:bulkcal:confirm" })])
+    ]), true);
+    expect(s.store.resolveTelegramMessage(42, 200)?.scopeMailIds).toEqual([first.id, second.id]);
+
+    const arrivedAfterPreview = s.store.upsertMail({ ...incoming, uid: 303, messageId: "<calendar-303@example.com>", subject: "جلسه جدید",
+      calendar: { parserVersion: 1, method: "REQUEST", uid: "event-303", summary: "جلسه جدید", attendees: [] } });
+    await (s.app as any).handleSystemCallback("confirm-bulk-calendar", "sys:bulkcal:confirm", 200, 42);
+
+    expect(s.imap.archiveMany).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ id: first.id }), expect.objectContaining({ id: second.id })
+    ]));
+    expect(s.imap.archiveMany.mock.calls[0]![0]).toHaveLength(2);
+    expect(s.store.getMail(first.id)?.state).toBe("done");
+    expect(s.store.getMail(second.id)?.state).toBe("done");
+    expect(s.store.getMail(arrivedAfterPreview.id)?.state).toBe("pending");
+    expect(s.store.getMail(s.id)?.state).toBe("pending");
+    s.store.close();
+  });
   it("durably accepts a Telegram message before processing and does not execute duplicate updates", async () => {
     const s = setup();
     const update = { update_id: 700, message: { message_id: 900, chat: { id: 42 }, from: { id: 42 }, text: "/status" } };

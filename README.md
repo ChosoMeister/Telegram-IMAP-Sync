@@ -14,6 +14,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Independent importance and action ownership: a critical FYI stays critical and keeps its risk even when no direct user action is required
 - Independent open/waiting mail tasks with timezone-aware durable reminders, restart recovery, delivery tracking, deduplication, and `/tasks` controls
 - Free-text Telegram fallback plus bounded local `/search`/«جستجو …» over retained mail without changing mailbox state
+- Standalone bulk calendar-archive requests with per-account preview, immutable snapshot, item review, and explicit confirmation; mail arriving after preview is never added to the approved action
 - Explicit opt-in informational/newsletter/marketing automation with global/account scope, keyword exceptions, observation-only evidence, per-mail Persian explanations, and `/automations` pause/resume controls
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy

@@ -45,6 +45,8 @@ For a new additional account, validate its folders and SMTP in a one-off dry-run
 
 `/automations` lists explicit user-created automation policies and allows each one to be paused or resumed. Start with `AUTOMATION_MODE=observe`, recreate the container, and inspect recorded reasons before considering execution. Observation never moves mail. `execute` is a separate mode with its own activation watermark, so messages that predate execution—including mail seen during observation—are not retroactively archived. If `APP_MODE` is not `live`, configured execution automatically degrades to observation. Even in effective execute mode, exceptions and high/critical messages remain pending. Policy creation or disabling requires an explicit conversational request such as «خبرنامه‌ها را خودکار آرشیو کن؛ انقضا استثناست»; AI inference alone cannot grant permission.
 
+A standalone Persian request to archive all calendar invitations creates a confirmation preview instead of moving mail immediately. The preview stores the exact Pending calendar-mail IDs, shows counts per account, and can display up to 20 selected event titles. Confirmation groups that immutable snapshot by account and uses each account's own IMAP connection. New mail arriving after preview is excluded. A changed or invalid snapshot fails closed, while an account-specific transport failure is reported without hiding successful account groups.
+
 Safe activation sequence:
 
 1. Keep `APP_MODE=live` only after normal archive commissioning is complete; set `AUTOMATION_MODE=observe` and recreate the container.
