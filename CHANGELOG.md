@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reduce durable-job scheduler pressure and rate-limit repeated overlap warnings while preserving overlap protection.
+
+## Unreleased
+
 - Prevent malformed or oversized AI action links from discarding an otherwise valid email analysis.
 - Keep terminal AI jobs stopped until the user explicitly requests a retry.
 - Stage compressed Telegram backups on the persistent backup volume instead of the bounded container tmpfs.

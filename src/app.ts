@@ -98,7 +98,7 @@ export class MailBotApp {
     for (const account of this.accounts) void this.superviseImap(account);
     this.scheduler.every("inbox-reconciliation", this.config.IMAP_RECONCILE_SECONDS * 1000, () => this.syncInbox(false));
     this.scheduler.every("telegram-queue-rotation", 60 * 60 * 1000, () => this.rotatePending());
-    this.scheduler.every("durable-jobs", 2_000, () => this.processJobs());
+    this.scheduler.every("durable-jobs", 5_000, () => this.processJobs());
     this.scheduler.every("telegram-commands", 1_000, () => this.processTelegramCommands());
     this.scheduler.every("task-reminders", 30_000, () => this.processTaskReminders());
     await this.processTaskReminders();

@@ -54,7 +54,7 @@ The container is read-only except for `/data` and `/tmp`, drops Linux capabiliti
 - Optional trusted owner identity is added to AI context. Analysis records whether an action belongs to self, another person, both, or is unknown; a deterministic alias-aware pass prevents the owner from being presented in third person.
 - Reply output also passes through a gender-safety normalizer: it strips unverified gendered titles and applies only an optional exact email-address override.
 - AI analysis jobs are leased from SQLite; abandoned leases return to the queue and repeated provider failures are bounded.
-- Periodic reconciliation, rotation, cleanup, retention, and backup tasks suppress overlapping executions and report rejected overlaps or task failures.
+- Periodic reconciliation, rotation, cleanup, retention, and backup tasks suppress overlapping executions. Repeated overlap warnings are rate-limited per task so a slow external dependency cannot flood production logs; task failures remain fully reported.
 - Legacy Inbox payloads missing attachment classification are refetched once and their existing Telegram cards are edited in place.
 - Legacy Inbox calendar payloads without structured event metadata are refetched once; ICS fields are parsed deterministically and the existing card is edited without waiting for AI.
 - Thread lookup temporarily opens Inbox/Archive/Sent mailboxes and restores the configured Inbox before normal reconciliation resumes.
