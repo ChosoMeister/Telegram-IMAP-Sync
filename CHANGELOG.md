@@ -9,7 +9,9 @@
 - Upgrade Nodemailer and Vitest to patched releases and remove personal data from public test fixtures.
 - Persist inbound Telegram text/Voice commands before advancing update offsets and retry interrupted processing from SQLite.
 - Preserve immutable historical card-to-mail references across rotation and backfill existing cards without republishing them.
-- Route direct Reply-to-card Persian intents to bounded Ask, Reply, Reply All, Forward, Cancel, and confirmation-gated Archive actions.
+- Route direct Reply-to-card Persian intents to bounded Ask, Reply, Reply All, Forward, Cancel, and exact-snapshot Archive actions.
+- Replace the first-stage router with an AI-backed, schema-validated plan containing only symbolic bounded actions; persist plans, clarification state, and per-action results in SQLite.
+- Execute clear conversational Archive commands against the immutable selected snapshot without including later thread replies, while keeping all generated email drafts behind the existing final-send approval.
 
 ## Unreleased
 

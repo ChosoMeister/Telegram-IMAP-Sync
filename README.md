@@ -9,7 +9,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Full Inbox import plus lightweight UID reconciliation; MIME and attachments are fetched only for new messages
 - Stable IMAP deduplication using mailbox, UIDVALIDITY, and UID
 - One Telegram card per exact RFC email thread; later Inbox replies replace the card at the bottom and show a chronological sectioned timeline
-- Durable direct Reply-to-card context: accepted commands survive restarts, old card references cannot drift to newer mail, and conversational Archive still requires confirmation
+- Durable direct Reply-to-card context with schema-validated AI plans, clarification, auditable tool results, reviewed drafts, and exact-snapshot Archive that cannot drift to newer mail
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
 - Grounded Persian action packets with priority, summary, owner-aware action, deadline, amounts, key facts, risk, and source-email action links

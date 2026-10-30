@@ -8,9 +8,9 @@ Incrementally add durable Persian conversation, memory, tasks, reminders, and op
 
 - [x] Stabilize the production baseline: AI parsing, terminal job retries, Telegram backup staging, dependency audit, and public fixtures.
 - [x] Persist Telegram message references and user commands before advancing update offsets; resolve direct replies to immutable mail snapshots.
-- [ ] Add a schema-validated conversational planner whose read/write tools reuse the existing archive, reply, forward, calendar, and recovery services.
+- [x] Add a schema-validated conversational planner whose read/write tools reuse the existing archive, reply, forward, calendar, and recovery services.
   - [x] Add a fail-closed first-stage intent router for Ask, Reply, Reply All, Forward, Cancel, and confirmation-gated Archive.
-  - [ ] Add validated multi-step plans, clarification, and durable tool-result history.
+  - [x] Add validated multi-step plans, clarification, and durable tool-result history.
 - [ ] Add structured memory, explicit permissions, exceptions, explanations, and superseding corrections in SQLite.
 - [ ] Add independent mail tasks and durable Tehran-time reminders with restart/downtime recovery.
 - [ ] Add observation-only automation, then gated execution for new mail after explicit production approval.

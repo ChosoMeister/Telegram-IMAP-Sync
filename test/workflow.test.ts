@@ -4,8 +4,8 @@ import { Store } from "../src/store.js";
 import { Logger } from "../src/logger.js";
 import { config, incoming } from "./helpers.js";
 
-function setup(archive = vi.fn().mockResolvedValue(undefined)) {
-  const isolatedConfig = { ...config, aiProviderOrder: [...config.aiProviderOrder], sttModelOrder: [...config.sttModelOrder] };
+function setup(archive = vi.fn().mockResolvedValue(undefined), appMode: "dry-run" | "live" = "dry-run") {
+  const isolatedConfig = { ...config, APP_MODE: appMode, aiProviderOrder: [...config.aiProviderOrder], sttModelOrder: [...config.sttModelOrder] };
   const store = new Store(":memory:");
   const { id } = store.upsertMail(incoming);
   store.setTelegramMessages(id, [100, 101]);
@@ -25,6 +25,12 @@ function setup(archive = vi.fn().mockResolvedValue(undefined)) {
   };
   const ai = {
     analyze: vi.fn().mockResolvedValue(undefined), ask: vi.fn().mockResolvedValue("پاسخ آزمایشی"),
+    planConversationRequest: vi.fn(async (_mail: any, request: string) => {
+      if (request.includes("مبهم") && !request.includes("توضیح کاربر")) return { summaryFa: "ابهام", needsClarification: true, clarificationQuestion: "منظورتان پاسخ است یا آرشیو؟", actions: [] };
+      if (request.includes("آرشیو")) return { summaryFa: "آرشیو", needsClarification: false, actions: [{ kind: "archive", target: "this_mail" }] };
+      if (request.includes("بهش بگو")) return { summaryFa: "پیش‌نویس", needsClarification: false, actions: [{ kind: "draft_reply", target: "this_mail", instruction: request, tone: "formal", replyAll: false }] };
+      return { summaryFa: "پرسش", needsClarification: false, actions: [{ kind: "ask", target: "this_mail", question: request }] };
+    }),
     draftReply: vi.fn().mockResolvedValue("پیش‌نویس صوتی"), draftForward: vi.fn().mockResolvedValue("متن فوروارد"),
     reconcileVoiceTranscript: vi.fn().mockResolvedValue({ finalTranscript: "به ایشان بگو unsubscribe را انجام می‌دهم", confidence: 0.92, uncertainTerms: [], rationale: "توافق دو مدل" }),
     status: vi.fn().mockReturnValue({})
@@ -49,19 +55,55 @@ describe("Done transaction", () => {
     s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
     await (s.app as any).handleText({ message_id: 901, chat: { id: 42 }, from: { id: 42 },
       reply_to_message: { message_id: 100 }, text: "این ایمیل چه اقدامی از من می‌خواهد؟" });
-    expect(s.ai.ask).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "این ایمیل چه اقدامی از من می‌خواهد؟", [], "");
+    expect(s.ai.ask).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "این ایمیل چه اقدامی از من می‌خواهد؟");
     expect(s.store.getConversation(42, s.id)).toBeUndefined();
     s.store.close();
   });
-  it("requires confirmation before a conversational archive action", async () => {
-    const s = setup();
+  it("treats a clear direct conversational archive command as authorization for that exact mail", async () => {
+    const archive = vi.fn().mockResolvedValue(undefined);
+    const s = setup(archive, "live");
     s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
     await (s.app as any).handleText({ message_id: 903, chat: { id: 42 }, from: { id: 42 },
       reply_to_message: { message_id: 100 }, text: "این رو آرشیو کن" });
-    expect(s.archive).not.toHaveBeenCalled();
-    expect(s.telegram.editMessage).toHaveBeenCalledWith(100, expect.stringContaining("آیا این ایمیل"), expect.arrayContaining([
-      expect.arrayContaining([expect.objectContaining({ callback_data: `m:${s.id}:done` })])
-    ]));
+    expect(s.archive).toHaveBeenCalledOnce();
+    expect(s.store.getMail(s.id)?.state).toBe("done");
+    s.store.close();
+  });
+  it("never expands an old card archive snapshot to a reply that arrived later", async () => {
+    const archive = vi.fn().mockResolvedValue(undefined);
+    const s = setup(archive, "live");
+    const newer = s.store.upsertMail({ ...incoming, uid: 8, messageId: "<newer@example.com>", inReplyTo: incoming.messageId,
+      subject: "Re: Test", receivedAt: new Date("2026-08-19T10:00:00Z") });
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 99, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    await (s.app as any).handleText({ message_id: 907, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 99 }, text: "این رو آرشیو کن" });
+    expect(s.imap.archiveMany).toHaveBeenCalledWith([expect.objectContaining({ id: s.id })]);
+    expect(s.store.getMail(s.id)?.state).toBe("done");
+    expect(s.store.getMail(newer.id)?.state).toBe("pending");
+    s.store.close();
+  });
+  it("turns a natural direct instruction into a reviewed draft without sending it", async () => {
+    const s = setup();
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    await (s.app as any).handleText({ message_id: 904, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 100 }, text: "بهش بگو نسخه اصلاح‌شده رو بفرسته" });
+    expect(s.ai.draftReply).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), "بهش بگو نسخه اصلاح‌شده رو بفرسته", "formal", false, expect.any(Array));
+    expect(s.smtp.sendRaw).not.toHaveBeenCalled();
+    expect(s.store.getConversation(42, s.id)).toMatchObject({ mode: "review", draft: "پیش‌نویس صوتی", metadata: { draftVersion: 1 } });
+    s.store.close();
+  });
+  it("persists an ambiguous plan and binds the clarification reply to the same mail", async () => {
+    const s = setup();
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    await (s.app as any).handleText({ message_id: 905, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 100 }, text: "این درخواست مبهمه" });
+    expect(s.store.getConversation(42, s.id)).toMatchObject({ mode: "plan_clarification", promptMessageId: 200 });
+    expect(s.telegram.sendMessage).toHaveBeenCalledWith("منظورتان پاسخ است یا آرشیو؟", undefined, false, true);
+
+    await (s.app as any).handleText({ message_id: 906, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 200 }, text: "فقط درباره‌اش توضیح بده" });
+    expect(s.ai.ask).toHaveBeenCalledWith(expect.objectContaining({ id: s.id }), expect.stringContaining("توضیح کاربر"));
+    expect(s.store.getConversation(42, s.id)).toBeUndefined();
     s.store.close();
   });
   it("renders operational commands as dismissible messages and removes the typed command", async () => {

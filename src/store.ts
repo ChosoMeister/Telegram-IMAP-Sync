@@ -58,6 +58,17 @@ export interface TelegramCommand {
   attempts: number;
 }
 
+export interface StoredConversationPlan {
+  id: number;
+  chatId: number;
+  messageId: number;
+  mailId: number;
+  requestText: string;
+  scopeMailIds: number[];
+  plan: Record<string, unknown>;
+  state: "planned" | "waiting" | "running" | "complete" | "failed" | "cancelled";
+}
+
 export class Store {
   private readonly db: DatabaseSync;
   constructor(path: string, private readonly primaryAccountId = "primary", private readonly primaryAccountLabel = "Primary") {
@@ -235,6 +246,33 @@ export class Store {
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX telegram_commands_ready_idx ON telegram_commands(state,available_at);
+    `);
+    this.applyMigration(7, `
+      CREATE TABLE conversation_plans (
+        id INTEGER PRIMARY KEY,
+        chat_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        mail_id INTEGER NOT NULL REFERENCES mails(id) ON DELETE CASCADE,
+        request_text TEXT NOT NULL,
+        scope_mail_ids_json TEXT NOT NULL,
+        plan_json TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'planned' CHECK(state IN ('planned','waiting','running','complete','failed','cancelled')),
+        last_error TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(chat_id,message_id)
+      );
+      CREATE TABLE conversation_tool_results (
+        id INTEGER PRIMARY KEY,
+        plan_id INTEGER NOT NULL REFERENCES conversation_plans(id) ON DELETE CASCADE,
+        action_index INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('complete','failed','skipped','waiting_confirmation')),
+        result_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(plan_id,action_index)
+      );
+      CREATE INDEX conversation_plans_mail_idx ON conversation_plans(mail_id,created_at);
     `);
     for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
       const mail = JSON.parse(row.payload_json) as IncomingMail;
@@ -581,6 +619,39 @@ export class Store {
   failTelegramCommand(id: number, error: string, retryDelayMs = 5000, terminal = false): void {
     this.db.prepare(`UPDATE telegram_commands SET state=?,available_at=?,lease_until=NULL,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?`)
       .run(terminal ? "failed" : "queued", Date.now() + retryDelayMs, error, id);
+  }
+
+  createConversationPlan(input: { chatId: number; messageId: number; mailId: number; requestText: string; scopeMailIds: number[]; plan: Record<string, unknown> }): number {
+    this.db.prepare(`INSERT INTO conversation_plans(chat_id,message_id,mail_id,request_text,scope_mail_ids_json,plan_json)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(chat_id,message_id) DO NOTHING`)
+      .run(input.chatId, input.messageId, input.mailId, input.requestText, JSON.stringify(input.scopeMailIds), JSON.stringify(input.plan));
+    const row = this.db.prepare("SELECT id FROM conversation_plans WHERE chat_id=? AND message_id=?")
+      .get(input.chatId, input.messageId) as { id: number };
+    return row.id;
+  }
+
+  getConversationPlan(id: number): StoredConversationPlan | undefined {
+    const row = this.db.prepare("SELECT * FROM conversation_plans WHERE id=?").get(id) as any;
+    if (!row) return undefined;
+    return { id: row.id, chatId: row.chat_id, messageId: row.message_id, mailId: row.mail_id,
+      requestText: row.request_text, scopeMailIds: JSON.parse(row.scope_mail_ids_json) as number[],
+      plan: JSON.parse(row.plan_json) as Record<string, unknown>, state: row.state };
+  }
+
+  finishConversationPlan(id: number, state: StoredConversationPlan["state"], error?: string): void {
+    this.db.prepare("UPDATE conversation_plans SET state=?,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(state, error ?? null, id);
+  }
+
+  appendConversationToolResult(planId: number, actionIndex: number, kind: string, state: "complete" | "failed" | "skipped" | "waiting_confirmation", result: Record<string, unknown> = {}): void {
+    this.db.prepare(`INSERT INTO conversation_tool_results(plan_id,action_index,kind,state,result_json) VALUES(?,?,?,?,?)
+      ON CONFLICT(plan_id,action_index) DO NOTHING`).run(planId, actionIndex, kind, state, JSON.stringify(result));
+  }
+
+  listConversationToolResults(planId: number): Array<{ actionIndex: number; kind: string; state: string; result: Record<string, unknown> }> {
+    return (this.db.prepare("SELECT * FROM conversation_tool_results WHERE plan_id=? ORDER BY action_index").all(planId) as unknown as any[])
+      .map((row) => ({ actionIndex: row.action_index, kind: row.kind, state: row.state,
+        result: JSON.parse(row.result_json) as Record<string, unknown> }));
   }
 
   setState(id: number, state: StoredMail["state"], error?: string): void {

@@ -88,6 +88,25 @@ describe("AI analysis normalization", () => {
     expect(models).toEqual(["primary", "fallback"]);
     fetchMock.mockRestore();
   });
+  it("validates a structured conversational plan from the configured AI provider", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ summaryFa: "ساخت پاسخ", needsClarification: false, actions: [
+        { kind: "draft_reply", target: "this_mail", instruction: "نسخه اصلاح‌شده را درخواست کن", tone: "formal", replyAll: false }
+      ] }) } }]
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const service = new AiService({
+      ...config, AI_ENABLED: true, AI_PROVIDER_ORDER: "proxy", aiProviderOrder: ["proxy"],
+      AI_PROXY_BASE_URL: "https://ai.example.test/v1", AI_PROXY_API_KEY: "test", AI_PROXY_MODEL: "test"
+    }, new Logger("error"));
+    const plan = await service.planConversationRequest(
+      { ...incoming, id: 1, state: "pending", telegramMessageIds: [] },
+      "بهش بگو نسخه اصلاح‌شده رو بفرسته", 1
+    );
+    expect(plan).toMatchObject({ needsClarification: false, actions: [{ kind: "draft_reply", target: "this_mail" }] });
+    const request = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(request.messages[0].content).toContain("Never output database IDs");
+    fetchMock.mockRestore();
+  });
   it("adjudicates Persian-English ASR candidates without transliterating supported English terms", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       choices: [{ message: { content: JSON.stringify({

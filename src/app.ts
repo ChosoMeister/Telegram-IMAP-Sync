@@ -22,6 +22,7 @@ import { SafeScheduler } from "./scheduler.js";
 import { DurableJobWorker } from "./jobs.js";
 import { effectLabel, LearnedRuleService, type FeedbackChoice, type RuleProposal } from "./learned-rules.js";
 import { planConversation } from "./conversation/planner.js";
+import type { ConversationPlan, ConversationPlanAction } from "./conversation/plan.js";
 
 export class MailBotApp {
   private readonly startedAt = new Date();
@@ -800,13 +801,14 @@ export class MailBotApp {
     }, 3_000);
   }
 
-  private async startForward(mail: StoredMail): Promise<void> {
+  private async startForward(mail: StoredMail, instruction = "", planId?: number): Promise<void> {
     const existing = this.store.getConversation(this.config.TELEGRAM_USER_ID, mail.id);
     if (existing?.mode === "forward_recipients") {
       await this.editPrimary(mail, "↪️ منتظر آدرس گیرنده فوروارد هستم…", [[{ text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }]]);
       return;
     }
-    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_recipients", false, "formal", undefined, { kind: "forward" });
+    this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "forward_recipients", false, "formal", undefined,
+      { kind: "forward", ...(instruction ? { instruction } : {}), ...(planId ? { planId } : {}) });
     const prompt = await this.telegram.sendMessage("آدرس ایمیل گیرنده را وارد کنید. برای چند گیرنده، آدرس‌ها را با ویرگول جدا کنید:", undefined, false, true);
     this.store.setConversationPrompt(this.config.TELEGRAM_USER_ID, mail.id, prompt.message_id);
     this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
@@ -875,30 +877,18 @@ export class MailBotApp {
       return;
     }
     const promptMessageId = message.reply_to_message?.message_id;
-    let conversation = promptMessageId ? this.store.getConversationByPrompt(this.config.TELEGRAM_USER_ID, promptMessageId) : undefined;
+    const conversation = promptMessageId ? this.store.getConversationByPrompt(this.config.TELEGRAM_USER_ID, promptMessageId) : undefined;
     if (!conversation && promptMessageId && message.text?.trim()) {
       const reference = this.store.resolveTelegramMessage(message.chat.id, promptMessageId);
       const referencedMail = reference ? this.store.getMail(reference.mailId) : undefined;
       if (reference?.role === "card" && referencedMail) {
-        const intent = planConversation(message.text);
-        if (intent.kind === "archive") {
-          await this.editPrimary(referencedMail, "آیا این ایمیل از Inbox خارج و آرشیو شود؟", [[
-            { text: "✅ تأیید و آرشیو", callback_data: `m:${referencedMail.id}:done`, style: "success" },
-            { text: "↩️ انصراف", callback_data: `m:${referencedMail.id}:summary` }
-          ]]);
-          return;
-        }
-        if (intent.kind === "reply") return this.startReply(referencedMail, intent.replyAll);
-        if (intent.kind === "forward") return this.startForward(referencedMail);
-        if (intent.kind === "cancel") { this.store.clearConversation(this.config.TELEGRAM_USER_ID, referencedMail.id); return this.showSummary(referencedMail); }
-        this.store.setConversation(this.config.TELEGRAM_USER_ID, referencedMail.id, "ai_question", false, "formal", undefined,
-          { kind: "ask", context: "mail", immutableScopeMailIds: reference.scopeMailIds, sourceMessageId: promptMessageId });
-        conversation = this.store.getConversation(this.config.TELEGRAM_USER_ID, referencedMail.id);
+        await this.planAndExecuteCardRequest(message, referencedMail, reference.scopeMailIds);
+        return;
       }
     }
-    if (!conversation || !["instruction", "voice_instruction", "voice_transcript_edit", "manual_edit", "forward_recipients", "ai_question"].includes(conversation.mode)) {
+    if (!conversation || !["instruction", "voice_instruction", "voice_transcript_edit", "manual_edit", "forward_recipients", "ai_question", "plan_clarification"].includes(conversation.mode)) {
       const active = this.store.getConversation(this.config.TELEGRAM_USER_ID);
-      if (active && ["instruction", "voice_instruction", "voice_transcript_edit", "manual_edit", "forward_recipients", "ai_question"].includes(active.mode)) {
+      if (active && ["instruction", "voice_instruction", "voice_transcript_edit", "manual_edit", "forward_recipients", "ai_question", "plan_clarification"].includes(active.mode)) {
         await this.telegram.sendMessage("برای جلوگیری از انتخاب ایمیل اشتباه، متن یا Voice را فقط با Reply مستقیم به پیام درخواست ربات ارسال کنید.", undefined, true);
       }
       return;
@@ -962,6 +952,16 @@ export class MailBotApp {
       await this.telegram.sendMessage("در این مرحله باید متن ارسال کنید.", undefined, true);
       return;
     }
+    if (conversation.mode === "plan_clarification") {
+      const originalRequest = String(conversation.metadata?.originalRequest ?? "");
+      const scopeMailIds = Array.isArray(conversation.metadata?.immutableScopeMailIds)
+        ? conversation.metadata.immutableScopeMailIds.filter((id): id is number => typeof id === "number") : [mail.id];
+      const previousPlanId = Number(conversation.metadata?.planId ?? 0);
+      if (previousPlanId) this.store.finishConversationPlan(previousPlanId, "cancelled");
+      this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
+      await this.planAndExecuteCardRequest(message, mail, scopeMailIds, `${originalRequest}\nتوضیح کاربر: ${message.text}`);
+      return;
+    }
     if (conversation.mode === "ai_question") {
       await this.editPrimary(mail, "✨ در حال بررسی ایمیل و آماده‌سازی پاسخ AI…", [[
         { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
@@ -991,8 +991,8 @@ export class MailBotApp {
         { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
       ]]);
       let draft = "با درود و مهر\n\nجهت بررسی و اقدام ارسال می‌شود.\n\nبا سپاس";
-      try { draft = await this.ai.draftForward(mail, "", conversation.tone); } catch { /* safe fallback */ }
-      const metadata = { kind: "forward", recipients };
+      try { draft = await this.ai.draftForward(mail, String(conversation.metadata?.instruction ?? ""), conversation.tone); } catch { /* safe fallback */ }
+      const metadata = { ...(conversation.metadata ?? {}), kind: "forward", recipients, draftVersion: 1 };
       this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", false, conversation.tone, draft, metadata);
       await this.cleanupConversationMessages(mail, message.message_id);
       await this.showForwardDraft(mail, draft, recipients);
@@ -1009,6 +1009,109 @@ export class MailBotApp {
     const voiceTranscript = this.voiceTranscript(conversation.metadata);
     if (isForward) await this.showForwardDraft(mail, draft, this.forwardRecipients(conversation.metadata), voiceTranscript);
     else await this.showDraft(mail, draft, conversation.replyAll, voiceTranscript);
+  }
+
+  private async planAndExecuteCardRequest(message: TelegramMessage, mail: StoredMail, scopeMailIds: number[], request = message.text ?? ""): Promise<void> {
+    let plan: ConversationPlan;
+    try { plan = await this.ai.planConversationRequest(mail, request, scopeMailIds.length); }
+    catch { plan = this.fallbackConversationPlan(request); }
+    const exclusive = plan.actions.filter((action) => action.kind === "archive" || action.kind === "cancel");
+    const drafts = plan.actions.filter((action) => action.kind === "draft_reply" || action.kind === "draft_forward");
+    if (!plan.needsClarification && ((exclusive.length && plan.actions.length > 1) || drafts.length > 1)) {
+      plan = { summaryFa: "درخواست چندبخشی نیاز به تعیین ترتیب دارد", needsClarification: true,
+        clarificationQuestion: "این کارها را به چه ترتیبی انجام دهم؟", actions: [] };
+    }
+    const planId = this.store.createConversationPlan({ chatId: message.chat.id, messageId: message.message_id, mailId: mail.id,
+      requestText: request, scopeMailIds, plan: plan as unknown as Record<string, unknown> });
+    if (plan.needsClarification) {
+      this.store.finishConversationPlan(planId, "waiting");
+      this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "plan_clarification", false, "formal", undefined,
+        { planId, originalRequest: request, immutableScopeMailIds: scopeMailIds });
+      const prompt = await this.telegram.sendMessage(plan.clarificationQuestion!, undefined, false, true);
+      this.store.setConversationPrompt(this.config.TELEGRAM_USER_ID, mail.id, prompt.message_id);
+      this.store.setTelegramMessages(mail.id, [...mail.telegramMessageIds, prompt.message_id], mail.telegramCreatedAt);
+      this.store.registerTelegramMessage({ chatId: prompt.chat.id, messageId: prompt.message_id, mailId: mail.id, role: "prompt", scopeMailIds });
+      return;
+    }
+    this.store.finishConversationPlan(planId, "running");
+    try {
+      for (const [index, action] of plan.actions.entries()) await this.executeConversationAction(planId, index, action, mail, scopeMailIds);
+      this.store.finishConversationPlan(planId, "complete");
+    } catch (error) {
+      this.store.finishConversationPlan(planId, "failed", describeError(error));
+      throw error;
+    }
+  }
+
+  private async executeConversationAction(planId: number, actionIndex: number, action: ConversationPlanAction, mail: StoredMail, scopeMailIds: number[]): Promise<void> {
+    try {
+      if (action.kind === "archive") await this.archiveConversationTarget(mail, action.target === "snapshot" ? scopeMailIds : [mail.id]);
+      else if (action.kind === "cancel") { this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id); await this.showSummary(mail); }
+      else if (action.kind === "ask") {
+        const answer = await this.ai.ask(mail, action.question);
+        await this.editPrimary(this.store.getMail(mail.id)!, `<b>✨ پاسخ AI</b>\n\n${esc(splitTelegramText(answer, 3400)[0]!)}`, [[
+          { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
+        ]]);
+        this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete", { answer });
+        return;
+      } else if (action.kind === "draft_reply") {
+        const draft = await this.ai.draftReply(mail, action.instruction, action.tone, action.replyAll, await this.imapFor(mail).findThread(mail));
+        this.store.setConversation(this.config.TELEGRAM_USER_ID, mail.id, "review", action.replyAll, action.tone, draft,
+          { kind: "reply", planId, draftVersion: 1 });
+        await this.showDraft(mail, draft, action.replyAll);
+        this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete", { draftVersion: 1, replyAll: action.replyAll });
+        return;
+      } else if (action.kind === "draft_forward") {
+        await this.startForward(mail, action.instruction, planId);
+        this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete", { awaitingRecipients: true });
+        return;
+      }
+      this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete");
+    } catch (error) {
+      this.store.appendConversationToolResult(planId, actionIndex, action.kind, "failed", { error: describeError(error) });
+      throw error;
+    }
+  }
+
+  private async archiveConversationTarget(contextMail: StoredMail, requestedIds: number[]): Promise<void> {
+    const uniqueIds = [...new Set(requestedIds)];
+    const mails = uniqueIds.map((id) => this.store.getMail(id)).filter((mail): mail is StoredMail => Boolean(mail));
+    if (mails.length !== uniqueIds.length) throw new Error("بخشی از snapshot ایمیل دیگر در دسترس نیست؛ عملیات انجام نشد.");
+    if (mails.some((mail) => mail.accountId !== contextMail.accountId)) throw new Error("عملیات چندحسابی در یک مرحله مجاز نیست.");
+    if (mails.every((mail) => mail.state === "done" || mail.state === "external_done")) return;
+    const actionable = mails.filter((mail) => mail.state === "pending" || mail.state === "failed");
+    if (!actionable.length) throw new Error("ایمیل انتخاب‌شده در وضعیت قابل آرشیو نیست.");
+    if (this.config.APP_MODE !== "live") {
+      await this.telegram.sendMessage("🧪 حالت آزمایشی فعال است؛ ایمیل جابه‌جا نشد.", undefined, true);
+      return;
+    }
+    for (const mail of actionable) this.store.setState(mail.id, "processing");
+    try {
+      await this.imapFor(contextMail).archiveMany(actionable);
+      for (const mail of actionable) {
+        this.store.setState(mail.id, "done");
+        this.store.clearConversation(this.config.TELEGRAM_USER_ID, mail.id);
+        if (mail.telegramMessageIds.length) this.store.enqueueJob("telegram_cleanup", mail.id, { reason: "conversation_archive" });
+      }
+      await this.processJobs();
+      await this.syncInbox(true);
+      this.logger.info("Conversational snapshot archived", { accountId: contextMail.accountId, mailIds: actionable.map((mail) => mail.id) });
+    } catch (error) {
+      for (const mail of actionable) this.store.setState(mail.id, "failed", describeError(error));
+      throw error;
+    }
+  }
+
+  private fallbackConversationPlan(request: string): ConversationPlan {
+    const intent = planConversation(request);
+    if (intent.kind === "archive" || intent.kind === "cancel") return { summaryFa: "اجرای درخواست روشن کاربر", needsClarification: false,
+      actions: [{ kind: intent.kind, target: "this_mail" }] };
+    if (intent.kind === "reply") return { summaryFa: "ساخت پیش‌نویس پاسخ", needsClarification: false,
+      actions: [{ kind: "draft_reply", target: "this_mail", instruction: request, tone: "formal", replyAll: intent.replyAll }] };
+    if (intent.kind === "forward") return { summaryFa: "آماده‌سازی فوروارد", needsClarification: false,
+      actions: [{ kind: "draft_forward", target: "this_mail", instruction: request }] };
+    return { summaryFa: "پاسخ به پرسش درباره ایمیل", needsClarification: false,
+      actions: [{ kind: "ask", target: "this_mail", question: intent.question }] };
   }
 
   private renderImapMode(status?: { connectionState?: string; notificationMode?: string }): string {

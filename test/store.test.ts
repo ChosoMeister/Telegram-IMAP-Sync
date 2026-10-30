@@ -65,6 +65,17 @@ describe("Store", () => {
     expect(store.leaseTelegramCommand()).toMatchObject({ updateId: 501, text: "اول", attempts: 1 });
     expect(store.leaseTelegramCommand()).toMatchObject({ updateId: 502, text: "دوم", attempts: 1 });
   });
+  it("persists a conversation plan and append-only tool results", () => {
+    const { id: mailId } = store.upsertMail(incoming);
+    const planId = store.createConversationPlan({ chatId: 42, messageId: 900, mailId, requestText: "جواب آماده کن",
+      scopeMailIds: [mailId], plan: { summaryFa: "ساخت پیش‌نویس", needsClarification: false, actions: [] } });
+    store.appendConversationToolResult(planId, 0, "draft_reply", "complete", { draftVersion: 1 });
+    store.finishConversationPlan(planId, "complete");
+    expect(store.getConversationPlan(planId)).toMatchObject({ id: planId, mailId, state: "complete", scopeMailIds: [mailId] });
+    expect(store.listConversationToolResults(planId)).toEqual([
+      expect.objectContaining({ actionIndex: 0, kind: "draft_reply", state: "complete", result: { draftVersion: 1 } })
+    ]);
+  });
   it("keeps independent drafts for multiple mails", () => {
     const first = store.upsertMail(incoming);
     const second = store.upsertMail({ ...incoming, uid: 8 });
