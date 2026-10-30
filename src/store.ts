@@ -1,5 +1,5 @@
 import { backup, DatabaseSync } from "node:sqlite";
-import type { Analysis, IncomingMail, LearnedRule, LearnedRuleEffect, LearnedRuleScope, MemoryRecord, StoredMail } from "./domain/types.js";
+import type { Analysis, IncomingMail, LearnedRule, LearnedRuleEffect, LearnedRuleScope, MailTask, MemoryRecord, StoredMail } from "./domain/types.js";
 import { deriveThreadKey } from "./mail/thread.js";
 
 interface MailRow {
@@ -294,6 +294,28 @@ export class Store {
       CREATE UNIQUE INDEX assistant_memories_active_key_idx
         ON assistant_memories(kind,memory_key,scope,account_id) WHERE status='active';
       CREATE INDEX assistant_memories_guidance_idx ON assistant_memories(status,confidence,scope,account_id);
+    `);
+    this.applyMigration(9, `
+      CREATE TABLE mail_tasks (
+        id INTEGER PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('open','waiting','done','cancelled')),
+        mail_ids_json TEXT NOT NULL,
+        due_at INTEGER,
+        timezone TEXT NOT NULL,
+        reminder_state TEXT NOT NULL DEFAULT 'none' CHECK(reminder_state IN ('none','pending','running','delivered','failed')),
+        attempts INTEGER NOT NULL DEFAULT 0,
+        available_at INTEGER NOT NULL DEFAULT 0,
+        lease_until INTEGER,
+        last_error TEXT,
+        telegram_message_id INTEGER,
+        dedupe_key TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX mail_tasks_due_idx ON mail_tasks(reminder_state,due_at,available_at);
+      CREATE INDEX mail_tasks_state_idx ON mail_tasks(state,account_id);
     `);
     for (const row of this.db.prepare("SELECT id,payload_json FROM mails WHERE thread_key IS NULL").all() as unknown as Array<{ id: number; payload_json: string }>) {
       const mail = JSON.parse(row.payload_json) as IncomingMail;
@@ -729,6 +751,62 @@ export class Store {
       confidence: row.confidence, source: row.source, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at,
       ...(row.account_id ? { accountId: row.account_id } : {}), ...(row.source_mail_id ? { sourceMailId: row.source_mail_id } : {}),
       ...(row.source_plan_id ? { sourcePlanId: row.source_plan_id } : {}), ...(row.supersedes_id ? { supersedesId: row.supersedes_id } : {}) };
+  }
+
+  createMailTask(input: { accountId: string; title: string; state: MailTask["state"]; mailIds: number[]; dueAt?: number; timezone: string; dedupeKey: string }): MailTask {
+    this.db.prepare(`INSERT INTO mail_tasks(account_id,title,state,mail_ids_json,due_at,timezone,reminder_state,dedupe_key)
+      VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(dedupe_key) DO NOTHING`).run(input.accountId, input.title, input.state,
+        JSON.stringify([...new Set(input.mailIds)]), input.dueAt ?? null, input.timezone, input.dueAt ? "pending" : "none", input.dedupeKey);
+    const row = this.db.prepare("SELECT * FROM mail_tasks WHERE dedupe_key=?").get(input.dedupeKey) as any;
+    return this.rowToMailTask(row);
+  }
+
+  listMailTasks(activeOnly = true): MailTask[] {
+    return (this.db.prepare(`SELECT * FROM mail_tasks ${activeOnly ? "WHERE state IN ('open','waiting')" : ""} ORDER BY COALESCE(due_at,9223372036854775807),id`).all() as unknown as any[])
+      .map((row) => this.rowToMailTask(row));
+  }
+
+  getMailTask(id: number): MailTask | undefined {
+    const row = this.db.prepare("SELECT * FROM mail_tasks WHERE id=?").get(id) as any;
+    return row ? this.rowToMailTask(row) : undefined;
+  }
+
+  leaseDueReminder(leaseMs = 120_000): MailTask | undefined {
+    const now = Date.now();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("UPDATE mail_tasks SET reminder_state='pending',lease_until=NULL WHERE reminder_state='running' AND lease_until<=?").run(now);
+      const row = this.db.prepare(`SELECT * FROM mail_tasks WHERE state IN ('open','waiting') AND reminder_state='pending'
+        AND due_at<=? AND available_at<=? ORDER BY due_at,id LIMIT 1`).get(now, now) as any;
+      if (!row) { this.db.exec("COMMIT"); return undefined; }
+      this.db.prepare("UPDATE mail_tasks SET reminder_state='running',attempts=attempts+1,lease_until=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+        .run(now + leaseMs, row.id);
+      this.db.exec("COMMIT");
+      return this.rowToMailTask({ ...row, reminder_state: "running", attempts: row.attempts + 1 });
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  completeReminder(id: number, telegramMessageId: number): void {
+    this.db.prepare("UPDATE mail_tasks SET reminder_state='delivered',telegram_message_id=?,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(telegramMessageId, id);
+  }
+
+  failReminder(id: number, error: string, retryDelayMs: number, terminal: boolean): void {
+    this.db.prepare("UPDATE mail_tasks SET reminder_state=?,available_at=?,lease_until=NULL,last_error=?,updated_at=CURRENT_TIMESTAMP WHERE id=?")
+      .run(terminal ? "failed" : "pending", Date.now() + retryDelayMs, error, id);
+  }
+
+  setMailTaskState(id: number, state: MailTask["state"]): MailTask | undefined {
+    this.db.prepare(`UPDATE mail_tasks SET state=?,reminder_state=CASE WHEN ? IN ('done','cancelled') AND reminder_state IN ('pending','running')
+      THEN 'none' ELSE reminder_state END,lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=?`).run(state, state, id);
+    return this.getMailTask(id);
+  }
+
+  private rowToMailTask(row: any): MailTask {
+    return { id: row.id, accountId: row.account_id, title: row.title, state: row.state,
+      mailIds: JSON.parse(row.mail_ids_json) as number[], ...(row.due_at ? { dueAt: row.due_at } : {}),
+      timezone: row.timezone, reminderState: row.reminder_state, attempts: row.attempts, dedupeKey: row.dedupe_key,
+      ...(row.telegram_message_id ? { telegramMessageId: row.telegram_message_id } : {}) };
   }
 
   setState(id: number, state: StoredMail["state"], error?: string): void {

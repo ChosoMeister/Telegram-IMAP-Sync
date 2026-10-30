@@ -41,6 +41,8 @@ For a new additional account, validate its folders and SMTP in a one-off dry-run
 
 `/memory` lists confirmed and inferred assistant memories with their account/global scope and allows active non-superseded entries to be disabled or restored. Confirmed memories originate from explicit user wording; inferred model observations are stored for review but do not affect analysis until confirmed. A newer correction with the same kind/key/scope supersedes the old value.
 
+`/tasks` lists open and waiting mail tasks. A conversational request can create a task with or without a reminder; reminder time is rendered in `USER_TIMEZONE`. The task remains open after delivery and after its source email is archived or replied to. Telegram delivery has its own leased state and bounded retry; only a successful Bot API response marks it delivered. Use the task buttons to mark it done or cancel it.
+
 Useful commands:
 
 ```sh

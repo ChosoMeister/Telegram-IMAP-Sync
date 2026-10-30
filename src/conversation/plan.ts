@@ -11,6 +11,11 @@ const actionSchema = z.discriminatedUnion("kind", [
     memoryKind: z.enum(["preference", "role", "correction", "pattern", "exception", "permission"]),
     key: z.string().trim().min(1).max(120), statement: z.string().trim().min(1).max(1000),
     scope: z.enum(["global", "account"]) }),
+  z.object({ kind: z.literal("create_task"), target: targetSchema, title: z.string().trim().min(1).max(300),
+    taskState: z.enum(["open", "waiting"]).default("open"), dueAt: z.string().datetime({ offset: true }).optional(),
+    needsReminder: z.boolean().default(false) }).superRefine((action, context) => {
+      if (action.needsReminder && !action.dueAt) context.addIssue({ code: "custom", path: ["dueAt"], message: "Reminder requires dueAt" });
+    }),
   z.object({ kind: z.literal("cancel"), target: targetSchema })
 ]);
 

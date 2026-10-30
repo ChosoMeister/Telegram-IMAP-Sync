@@ -30,6 +30,7 @@ function setup(archive = vi.fn().mockResolvedValue(undefined), appMode: "dry-run
       if (request.includes("آرشیو")) return { summaryFa: "آرشیو", needsClarification: false, actions: [{ kind: "archive", target: "this_mail" }] };
       if (request.includes("بهش بگو")) return { summaryFa: "پیش‌نویس", needsClarification: false, actions: [{ kind: "draft_reply", target: "this_mail", instruction: request, tone: "formal", replyAll: false }] };
       if (request.includes("یادت باشه")) return { summaryFa: "ثبت حافظه", needsClarification: false, actions: [{ kind: "remember", target: "this_mail", memoryKind: "role", key: "finance_role", statement: "در مکاتبات مالی فقط ناظر هستم", scope: "account" }] };
+      if (request.includes("یادآوری")) return { summaryFa: "ثبت کار", needsClarification: false, actions: [{ kind: "create_task", target: "this_mail", title: "پاسخ به درخواست", taskState: "open", dueAt: "2026-08-18T10:00:00Z", needsReminder: true }] };
       return { summaryFa: "پرسش", needsClarification: false, actions: [{ kind: "ask", target: "this_mail", question: request }] };
     }),
     draftReply: vi.fn().mockResolvedValue("پیش‌نویس صوتی"), draftForward: vi.fn().mockResolvedValue("متن فوروارد"),
@@ -129,6 +130,20 @@ describe("Done transaction", () => {
     expect(s.telegram.sendMessageTo).toHaveBeenCalledWith(42, expect.stringContaining("پاسخ رسمی باشد"), expect.any(Array), true);
     await (s.app as any).handleSystemCallback("toggle-memory", `sys:memory:${memory.id}:toggle`, 200);
     expect(s.store.getMemory(memory.id)?.status).toBe("disabled");
+    s.store.close();
+  });
+  it("creates a mail task, delivers an overdue reminder once, and keeps the task open", async () => {
+    const s = setup();
+    s.store.registerTelegramMessage({ chatId: 42, messageId: 100, mailId: s.id, role: "card", scopeMailIds: [s.id] });
+    await (s.app as any).handleText({ message_id: 910, chat: { id: 42 }, from: { id: 42 },
+      reply_to_message: { message_id: 100 }, text: "برای پاسخ یادآوری بگذار" });
+    expect(s.store.listMailTasks()).toEqual([expect.objectContaining({ title: "پاسخ به درخواست", reminderState: "pending", state: "open" })]);
+    await (s.app as any).processTaskReminders();
+    expect(s.store.listMailTasks()).toEqual([expect.objectContaining({ reminderState: "delivered", state: "open" })]);
+    const reminderCalls = s.telegram.sendMessage.mock.calls.filter(([text]: [string]) => text.includes("یادآوری کار"));
+    expect(reminderCalls).toHaveLength(1);
+    await (s.app as any).processTaskReminders();
+    expect(s.telegram.sendMessage.mock.calls.filter(([text]: [string]) => text.includes("یادآوری کار"))).toHaveLength(1);
     s.store.close();
   });
   it("renders operational commands as dismissible messages and removes the typed command", async () => {

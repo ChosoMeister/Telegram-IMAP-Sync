@@ -24,6 +24,7 @@ import { effectLabel, LearnedRuleService, type FeedbackChoice, type RuleProposal
 import { planConversation } from "./conversation/planner.js";
 import type { ConversationPlan, ConversationPlanAction } from "./conversation/plan.js";
 import { MemoryService } from "./memory.js";
+import { createHash } from "node:crypto";
 
 export class MailBotApp {
   private readonly startedAt = new Date();
@@ -78,6 +79,7 @@ export class MailBotApp {
       { command: "backup", description: "وضعیت نسخه پشتیبان" },
       { command: "rules", description: "مدیریت قواعد یادگرفته‌شده" },
       { command: "memory", description: "حافظه تأییدشده دستیار" },
+      { command: "tasks", description: "کارها و یادآوری‌های باز" },
       { command: "diagnose", description: "گزارش کامل سلامت" },
       { command: "chatid", description: "نمایش شناسه چت برای Backup" }
     ]).catch((error) => this.logger.warn("Could not register Telegram commands", { error: describeError(error) }));
@@ -87,6 +89,8 @@ export class MailBotApp {
     this.scheduler.every("telegram-queue-rotation", 60 * 60 * 1000, () => this.rotatePending());
     this.scheduler.every("durable-jobs", 2_000, () => this.processJobs());
     this.scheduler.every("telegram-commands", 1_000, () => this.processTelegramCommands());
+    this.scheduler.every("task-reminders", 30_000, () => this.processTaskReminders());
+    await this.processTaskReminders();
     const purge = () => {
       const removed = this.store.purgeCompleted(this.config.DATA_RETENTION_DAYS);
       if (removed) this.logger.info("Expired completed local records purged", { removed, retentionDays: this.config.DATA_RETENTION_DAYS });
@@ -370,6 +374,12 @@ export class MailBotApp {
     if (memoryMatch && messageId) {
       this.memory.toggle(Number(memoryMatch[1]));
       const rendered = this.renderMemoryCommand();
+      await this.telegram.editMessage(messageId, rendered.text, rendered.buttons);
+    }
+    const taskMatch = /^sys:task:(\d+):(done|cancel)$/.exec(data);
+    if (taskMatch && messageId) {
+      this.store.setMailTaskState(Number(taskMatch[1]), taskMatch[2] === "done" ? "done" : "cancelled");
+      const rendered = this.renderTasksCommand();
       await this.telegram.editMessage(messageId, rendered.text, rendered.buttons);
     }
   }
@@ -878,6 +888,11 @@ export class MailBotApp {
       await this.sendCommandResult(message, rendered.text, rendered.buttons);
       return;
     }
+    if (command === "/tasks") {
+      const rendered = this.renderTasksCommand();
+      await this.sendCommandResult(message, rendered.text, rendered.buttons);
+      return;
+    }
     if (command === "/diagnose") {
       const status = this.status();
       await this.sendCommandResult(message, [
@@ -1096,6 +1111,19 @@ export class MailBotApp {
           { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary`, style: "primary" }
         ]]);
         return;
+      } else if (action.kind === "create_task") {
+        const dueAt = action.dueAt ? Date.parse(action.dueAt) : undefined;
+        if (action.needsReminder && (!dueAt || Number.isNaN(dueAt))) throw new Error("زمان یادآوری معتبر نیست.");
+        const mailIds = action.target === "snapshot" ? scopeMailIds : [mail.id];
+        const dedupeKey = createHash("sha256").update(JSON.stringify([mail.accountId, [...mailIds].sort(), action.title.trim().toLowerCase(), dueAt ?? null])).digest("hex");
+        const task = this.store.createMailTask({ accountId: mail.accountId ?? this.primaryAccountId, title: action.title,
+          state: action.taskState, mailIds, ...(dueAt ? { dueAt } : {}), timezone: this.config.USER_TIMEZONE, dedupeKey });
+        this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete", { taskId: task.id, reminderState: task.reminderState });
+        await this.editPrimary(mail, `🗓 کار #${task.id} ثبت شد: ${esc(task.title)}${task.dueAt ? `\nیادآوری: ${esc(this.formatTaskTime(task.dueAt))}` : ""}`, [[
+          { text: "✅ انجام شد", callback_data: `sys:task:${task.id}:done`, style: "success" },
+          { text: "↩️ بازگشت", callback_data: `m:${mail.id}:summary` }
+        ]]);
+        return;
       }
       this.store.appendConversationToolResult(planId, actionIndex, action.kind, "complete");
     } catch (error) {
@@ -1165,6 +1193,34 @@ export class MailBotApp {
         callback_data: `sys:memory:${memory.id}:toggle`
       }])
     };
+  }
+
+  private async processTaskReminders(): Promise<void> {
+    for (let task = this.store.leaseDueReminder(); task; task = this.store.leaseDueReminder()) {
+      try {
+        const sent = await this.telegram.sendMessage(`⏰ <b>یادآوری کار #${task.id}</b>\n${esc(task.title)}\n${esc(this.formatTaskTime(task.dueAt!))}`, [[
+          { text: "✅ انجام شد", callback_data: `sys:task:${task.id}:done`, style: "success" },
+          { text: "لغو", callback_data: `sys:task:${task.id}:cancel` }
+        ]]);
+        this.store.completeReminder(task.id, sent.message_id);
+      } catch (error) {
+        this.store.failReminder(task.id, describeError(error), Math.min(60_000, 2000 * (2 ** task.attempts)), task.attempts >= 5);
+      }
+    }
+  }
+
+  private renderTasksCommand(): { text: string; buttons: Array<Array<{ text: string; callback_data: string }>> } {
+    const tasks = this.store.listMailTasks(true);
+    if (!tasks.length) return { text: "✅ کار یا یادآوری بازی ندارید.", buttons: [] };
+    return { text: ["<b>کارهای باز</b>", ...tasks.map((task) => `#${task.id} — ${esc(task.title)}${task.dueAt ? `\n⏰ ${esc(this.formatTaskTime(task.dueAt))}` : ""}`)].join("\n\n"),
+      buttons: tasks.slice(0, 10).map((task) => [
+        { text: `✅ #${task.id}`, callback_data: `sys:task:${task.id}:done` },
+        { text: "لغو", callback_data: `sys:task:${task.id}:cancel` }
+      ]) };
+  }
+
+  private formatTaskTime(timestamp: number): string {
+    return new Intl.DateTimeFormat("fa-IR", { dateStyle: "medium", timeStyle: "short", timeZone: this.config.USER_TIMEZONE }).format(new Date(timestamp));
   }
 
   private renderImapMode(status?: { connectionState?: string; notificationMode?: string }): string {

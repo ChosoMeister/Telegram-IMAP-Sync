@@ -15,7 +15,7 @@ Incrementally add durable Persian conversation, memory, tasks, reminders, and op
   - [x] Persist sourced, scoped confirmed/inferred memories; apply only confirmed active memories to analysis; support superseding corrections and `/memory` disable/restore.
   - [x] Keep informational/action ownership independent from importance, score, risk, and notification urgency.
   - [ ] Add automation permission/exception evaluation and natural-language decision explanations.
-- [ ] Add independent mail tasks and durable Tehran-time reminders with restart/downtime recovery.
+- [x] Add independent mail tasks and durable timezone-aware reminders with restart/downtime recovery.
 - [ ] Add observation-only automation, then gated execution for new mail after explicit production approval.
 - [ ] Run migration/regression/real-model tests, update all documentation, and prepare backup, deployment, and rollback instructions.
 

@@ -24,4 +24,11 @@ describe("validated conversation plans", () => {
     }] });
     expect(plan.actions[0]).toMatchObject({ kind: "remember", memoryKind: "correction", scope: "account" });
   });
+  it("validates a durable task with an explicit ISO reminder time", () => {
+    const plan = parseConversationPlan({ summaryFa: "ثبت پیگیری", needsClarification: false, actions: [{
+      kind: "create_task", target: "this_mail", title: "پاسخ به درخواست", taskState: "open",
+      dueAt: "2026-11-01T10:00:00+03:30", needsReminder: true
+    }] });
+    expect(plan.actions[0]).toMatchObject({ kind: "create_task", needsReminder: true });
+  });
 });

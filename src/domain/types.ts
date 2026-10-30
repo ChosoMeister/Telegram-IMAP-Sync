@@ -118,6 +118,20 @@ export interface MemoryRecord {
   updatedAt: string;
 }
 
+export interface MailTask {
+  id: number;
+  accountId: string;
+  title: string;
+  state: "open" | "waiting" | "done" | "cancelled";
+  mailIds: number[];
+  dueAt?: number;
+  timezone: string;
+  reminderState: "none" | "pending" | "running" | "delivered" | "failed";
+  attempts: number;
+  dedupeKey: string;
+  telegramMessageId?: number;
+}
+
 export interface StoredMail extends IncomingMail {
   id: number;
   state: MailState;

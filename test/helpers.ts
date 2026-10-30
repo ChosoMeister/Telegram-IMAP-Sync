@@ -3,6 +3,7 @@ import type { IncomingMail } from "../src/domain/types.js";
 
 export const config: MailAccountAppConfig = {
   APP_MODE: "dry-run", LOG_LEVEL: "error", DATABASE_PATH: ":memory:", BACKUP_DIR: "/tmp/backups", BACKUP_INTERVAL_HOURS: 24, BACKUP_RETENTION: 7, DATA_RETENTION_DAYS: 90, HEALTH_PORT: 8080,
+  USER_TIMEZONE: "Asia/Tehran",
   mailAccountId: "primary", mailAccountLabel: "Primary",
   IMAP_HOST: "imap.example", IMAP_PORT: 993, IMAP_SECURE: true, IMAP_USER: "user", IMAP_PASSWORD: "pass",
   IMAP_MAILBOX: "INBOX", IMAP_ARCHIVE_MAILBOX: "Archive", IMAP_RECONCILE_SECONDS: 300,

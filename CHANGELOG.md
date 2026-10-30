@@ -14,6 +14,7 @@
 - Execute clear conversational Archive commands against the immutable selected snapshot without including later thread replies, while keeping all generated email drafts behind the existing final-send approval.
 - Add sourced global/account assistant memories with confirmed/inferred confidence, superseding corrections, trusted analysis guidance, and `/memory` controls.
 - Decouple informational/action-ownership feedback from importance, score, risk, and notification urgency so critical FYI alerts remain critical.
+- Add independent mail tasks and leased timezone-aware reminders with deduplication, restart recovery, separate delivery state, and `/tasks` completion/cancellation controls.
 
 ## Unreleased
 

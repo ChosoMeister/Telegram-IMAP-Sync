@@ -19,6 +19,7 @@ Copy `.env.example` to `.env`. Values containing spaces or shell characters do n
 | `MAIL_RULES_PATH` | unset | JSON rule file, normally `/app/config/mail-rules.json`. |
 | `HONORIFICS_PATH` | unset | Optional JSON map of lowercase email addresses to verified `خانم` or `آقای`; normally `/app/config/honorifics.json`. Unknown people are addressed neutrally. |
 | `USER_PROFILE_PATH` | unset | Optional ignored JSON profile, normally `/app/config/user-profile.json`, that identifies the mailbox owner to AI. Copy `config/user-profile.example.json`; include all of the owner's addresses and common name spellings, but never credentials. |
+| `USER_TIMEZONE` | `Asia/Tehran` | IANA timezone used to interpret and render conversational task/reminder times. |
 | `MAIL_ACCOUNT_FILES` | required for production | Ordered account files, for example `/app/config/account-orchid.env,/app/config/account-axon.env`. The first file is primary. |
 | `HEALTH_PORT` | `8080` | Container health/status HTTP port. Compose exposes it as loopback port 18080. |
 

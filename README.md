@@ -12,6 +12,7 @@ The project is currently safe to configure and test, but defaults to `APP_MODE=d
 - Durable direct Reply-to-card context with schema-validated AI plans, clarification, auditable tool results, reviewed drafts, and exact-snapshot Archive that cannot drift to newer mail
 - Structured global/account memory with explicit source and confidence, superseding corrections, `/memory` controls, and confirmed-only analysis guidance
 - Independent importance and action ownership: a critical FYI stays critical and keeps its risk even when no direct user action is required
+- Independent open/waiting mail tasks with timezone-aware durable reminders, restart recovery, delivery tracking, deduplication, and `/tasks` controls
 - Immediate Telegram delivery followed by background AI enrichment
 - Configurable AI order: Ollama and OpenAI-compatible organizational proxy
 - Grounded Persian action packets with priority, summary, owner-aware action, deadline, amounts, key facts, risk, and source-email action links
